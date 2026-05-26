@@ -1,0 +1,76 @@
+# Dependencies
+node_modules/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+electron-builder.env
+
+# Local app/user data
+CourseDashboard/
+CourseDashboard*/
+*.db
+*.sqlite
+*.sqlite3
+*.jsonl
+*.local.json
+*.store.json
+
+# Imported/generated course material
+lectures/
+lecture-imports/
+course-data/
+generated-course-data/
+extracted/
+extracted-text/
+**/extracted.txt
+**/lecture.json
+**/study_unit.json
+**/lecture_order.json
+**/course_settings.json
+*.pdf
+
+# Build outputs and packaged apps
+renderer/dist/
+dist/
+build/
+out/
+release/
+dist-app/
+*.app/
+*.dmg
+*.blockmap
+*.zip
+
+# Logs and diagnostics
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Caches and temporary files
+.cache/
+cache/
+tmp/
+temp/
+.vite/
+.vite-temp/
+coverage/
+
+# Private screenshots/debug captures
+screenshots/
+debug-screenshots/
+playwright-report/
+test-results/
+
+# OS/editor junk
+.DS_Store
+._*
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
