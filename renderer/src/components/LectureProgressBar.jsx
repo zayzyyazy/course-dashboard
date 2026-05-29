@@ -1,8 +1,15 @@
 import React from 'react';
 import { computeLectureProgress } from '../utils/lectureProgress';
 
-export default function LectureProgressBar({ lecture, compact = false, className = '' }) {
-  const { total, studied, remaining, percent } = computeLectureProgress(lecture);
+export default function LectureProgressBar({
+  lecture,
+  materialMode = 'lecture',
+  exerciseId = '',
+  compact = false,
+  className = ''
+}) {
+  const { total, studied, remaining, percent } = computeLectureProgress(lecture, materialMode, exerciseId);
+  const modeLabel = materialMode === 'exercise' ? 'exercise topics' : 'topics';
 
   if (total === 0) return null;
 
@@ -11,7 +18,7 @@ export default function LectureProgressBar({ lecture, compact = false, className
       <div className={`flex items-center justify-between gap-2 ${compact ? 'mb-1' : 'mb-2'}`}>
         <span className={`${compact ? 'text-xs' : 'text-sm'} text-text-secondary`}>
           <span className="text-text-primary font-medium">{studied}</span>
-          <span className="text-text-muted"> / {total} topics studied</span>
+          <span className="text-text-muted"> / {total} {modeLabel} studied</span>
         </span>
         <span className={`${compact ? 'text-xs' : 'text-sm'} font-medium text-accent`}>{percent}%</span>
       </div>

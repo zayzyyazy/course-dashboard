@@ -51,6 +51,18 @@ html, body, #root {
 .markdown-body h1 { font-size: 1.5rem; font-weight: 700; margin: 1.25rem 0 0.75rem; color: #e2e8f0; }
 .markdown-body h2 { font-size: 1.25rem; font-weight: 600; margin: 1rem 0 0.5rem; color: #e2e8f0; }
 .markdown-body h3 { font-size: 1.1rem; font-weight: 600; margin: 0.875rem 0 0.4rem; color: #cbd5e1; }
+.markdown-body h4 { font-size: 0.95rem; font-weight: 600; margin: 1rem 0 0.35rem; color: #a5b4fc; }
+.markdown-body h4 + blockquote,
+.markdown-body-note-study h4 + blockquote {
+  font-size: 0.75rem;
+  color: #64748b;
+  margin: 0.2rem 0 0.65rem;
+  padding: 0.35rem 0 0.35rem 0.75rem;
+  border-left: 2px solid #4f46e5;
+  background: transparent;
+}
+.markdown-body hr { border: none; border-top: 1px solid #2a3347; margin: 1.25rem 0; }
+.prose-note .markdown-body hr { margin: 1rem 0; }
 .markdown-body p { margin: 0.5rem 0; line-height: 1.7; color: #94a3b8; }
 .markdown-body ul, .markdown-body ol { padding-left: 1.5rem; margin: 0.5rem 0; }
 .markdown-body li { margin: 0.25rem 0; line-height: 1.6; color: #94a3b8; }
@@ -75,6 +87,43 @@ html, body, #root {
 .markdown-body-reading li { font-size: 1.0625rem; line-height: 1.75; }
 .markdown-body-reading .katex { font-size: 1.08em; color: #e8edf5; }
 .markdown-body-reading .katex-display { margin: 1rem 0; }
+
+/* Pin-to-screen floating cards — type scales with card size (font-size on .study-pin-card-content) */
+.study-pin-card-content .study-pin-markdown.markdown-body-reading p,
+.study-pin-card-content .study-pin-markdown.markdown-body-reading li {
+  font-size: 1em;
+  line-height: 1.65;
+}
+.study-pin-card-content .study-pin-markdown.markdown-body-reading h1 {
+  font-size: 1.45em;
+  margin-top: 0;
+  line-height: 1.35;
+}
+.study-pin-card-content .study-pin-markdown.markdown-body-reading h2 {
+  font-size: 1.25em;
+  margin-top: 1em;
+}
+.study-pin-card-content .study-pin-markdown.markdown-body-reading h3 {
+  font-size: 1.1em;
+}
+.study-pin-card-content .study-pin-markdown.markdown-body-reading .katex {
+  font-size: 1.05em;
+}
+.study-pin-card-content .study-pin-markdown.markdown-body-reading .katex-display {
+  margin: 0.65em 0;
+}
+
+/* Note-study AI chat bubbles */
+.markdown-body-chat { font-size: 0.875rem; }
+.markdown-body-chat h1,
+.markdown-body-chat h2,
+.markdown-body-chat h3 { font-size: 1rem; margin: 0.5rem 0 0.35rem; }
+.markdown-body-chat p { margin: 0.35rem 0; line-height: 1.65; }
+.markdown-body-chat ul,
+.markdown-body-chat ol { padding-left: 1.25rem; margin: 0.35rem 0; }
+.markdown-body-chat .katex { font-size: 1em; color: #e8edf5; }
+.markdown-body-chat .katex-display { margin: 0.5rem 0; overflow-x: auto; }
+.note-chat-md { user-select: text; }
 
 /* Animations */
 @keyframes fadeIn {

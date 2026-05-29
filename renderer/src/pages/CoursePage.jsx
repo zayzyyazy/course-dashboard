@@ -166,6 +166,7 @@ export default function CoursePage({
                       </p>
                       <p className="text-xs text-text-muted">
                         {lec.topicCount || 0} topics · {lec.studiedCount || 0} studied
+                        {lec.hasExercise ? ' · Übung' : ''}
                       </p>
                     </button>
                     {!reorderMode && (

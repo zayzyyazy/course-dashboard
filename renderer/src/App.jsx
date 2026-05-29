@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { useStore } from './hooks/useStore';
 import Sidebar from './components/Sidebar';
+import SidebarShell from './components/SidebarShell';
 import HomePage from './pages/HomePage';
 import CoursePage from './pages/CoursePage';
 import LecturePage from './pages/LecturePage';
@@ -13,6 +14,9 @@ import ProcessingOverlay from './components/ProcessingOverlay';
 import DeleteCourseModal from './components/DeleteCourseModal';
 import DeleteLectureModal from './components/DeleteLectureModal';
 import Toast from './components/Toast';
+import { StudyPinsProvider } from './state/studyPins.jsx';
+import StudyPinOverlay from './components/StudyPinOverlay';
+import { getMaterialTopics, findExerciseTopic, getExerciseSheets } from './utils/lectureMaterial';
 
 export default function App() {
   const { state, loading, update } = useStore();
@@ -32,6 +36,31 @@ export default function App() {
   const [lectureRefreshKey, setLectureRefreshKey] = useState(0);
   const [lectureToDelete, setLectureToDelete] = useState(null);
   const [deleteLectureFolderPath, setDeleteLectureFolderPath] = useState('');
+  const [openLectureNotes, setOpenLectureNotes] = useState(false);
+  const [pendingOpenNoteId, setPendingOpenNoteId] = useState(null);
+  const [returnViewAfterNote, setReturnViewAfterNote] = useState(null);
+  const [pendingExerciseNav, setPendingExerciseNav] = useState(null);
+  const [pendingFocusSubtopicId, setPendingFocusSubtopicId] = useState(null);
+  const [returnLectureTopicId, setReturnLectureTopicId] = useState(null);
+  const [lectureContentKey, setLectureContentKey] = useState(0);
+  const [materialMode, setMaterialMode] = useState('lecture');
+  const [selectedExerciseId, setSelectedExerciseId] = useState('');
+  const [dashboardKey, setDashboardKey] = useState(0);
+  const [sidebarHidden, setSidebarHidden] = useState(false);
+
+  useEffect(() => {
+    window.api.storeGetAll().then((data) => {
+      if (data?.sidebarHidden) setSidebarHidden(true);
+    });
+  }, []);
+
+  const toggleSidebar = useCallback(() => {
+    setSidebarHidden((prev) => {
+      const next = !prev;
+      window.api.storeSet('sidebarHidden', next);
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     if (!selectedLecture?.path) {
@@ -180,6 +209,78 @@ export default function App() {
     [selectedCourse]
   );
 
+  const bumpDashboard = useCallback(() => setDashboardKey((k) => k + 1), []);
+
+  const handleDashboardNavigate = useCallback(
+    async ({
+      courseId,
+      lectureId,
+      topicId,
+      subtopicId,
+      materialMode,
+      noteId,
+      itemType,
+      exerciseId: navExerciseId
+    }) => {
+      const course = state.courses.find((c) => c.id === courseId);
+      if (!course) return;
+      setSelectedCourse(course);
+      if (!lectureId) {
+        setSelectedLecture(null);
+        setSelectedTopic(null);
+        setView('course');
+        return;
+      }
+      const res = await window.api.getCourseLectures(course.storageKey || course.name);
+      const lec = res.lectures?.find((l) => l.id === lectureId);
+      if (!lec) {
+        setView('course');
+        return;
+      }
+      const full = await window.api.getLecture(lec.path);
+      const lecture = full || lec;
+      const mode = materialMode === 'exercise' ? 'exercise' : 'lecture';
+      const exerciseId = navExerciseId || '';
+
+      if (noteId) {
+        setSelectedLecture(lecture);
+        setSelectedTopic(null);
+        setMaterialMode(mode);
+        setSelectedExerciseId(mode === 'exercise' ? exerciseId : '');
+        setPendingOpenNoteId(noteId);
+        setPendingFocusSubtopicId(null);
+        setView('lecture');
+        return;
+      }
+
+      if (topicId) {
+        const topics =
+          mode === 'exercise'
+            ? getMaterialTopics(lecture, 'exercise', exerciseId)
+            : lecture.topics || [];
+        const topic =
+          topics.find((t) => t.id === topicId) ||
+          (mode === 'exercise' ? findExerciseTopic(lecture, topicId, exerciseId) : null);
+        if (topic) {
+          setSelectedLecture(lecture);
+          setSelectedTopic(topic);
+          setMaterialMode(mode);
+          setSelectedExerciseId(mode === 'exercise' ? exerciseId : '');
+          setPendingFocusSubtopicId(subtopicId || null);
+          setView('topic');
+          return;
+        }
+      }
+
+      setSelectedLecture(lecture);
+      setSelectedTopic(null);
+      setMaterialMode(itemType === 'promoted' ? 'lecture' : mode);
+      setSelectedExerciseId(mode === 'exercise' ? exerciseId : '');
+      setView('lecture');
+    },
+    [state.courses]
+  );
+
   const handlePromoteTopic = useCallback(
     async ({ lecturePath, topicId }) => {
       if (!selectedCourse) return;
@@ -212,6 +313,36 @@ export default function App() {
     [selectedCourse, state.apiKey, showToast]
   );
 
+  const handleAttachExercise = useCallback(async () => {
+    if (!selectedCourse || !selectedLecture?.path) return;
+    if (!state.apiKey) {
+      setView('settings');
+      return;
+    }
+    const pdfPath = await window.api.openExercisePdf();
+    if (!pdfPath) return;
+    setProcessing({ title: 'Processing Übung', message: 'Starting…' });
+    const result = await window.api.attachExercisePdf({
+      pdfPath,
+      lecturePath: selectedLecture.path,
+      ...coursePayload(selectedCourse)
+    });
+    setProcessing(null);
+    if (result.success) {
+      const lec = await window.api.getLecture(selectedLecture.path);
+      if (lec) setSelectedLecture(lec);
+      setMaterialMode('exercise');
+      const sheets = getExerciseSheets(lec);
+      setSelectedExerciseId(result.exerciseId || sheets[sheets.length - 1]?.id || sheets[0]?.id || '');
+      setLectureContentKey((k) => k + 1);
+      showToast(
+        sheets.length > 1 ? `Übung ${sheets.length} attached` : 'Übung attached to this lecture'
+      );
+    } else {
+      alert(result.error || 'Could not process exercise PDF');
+    }
+  }, [selectedCourse, selectedLecture?.path, state.apiKey, showToast]);
+
   const runProcess = useCallback(
     async (course) => {
       setShowImport(false);
@@ -243,34 +374,41 @@ export default function App() {
   }
 
   return (
+    <StudyPinsProvider activeLecturePath={selectedLecture?.path || ''}>
     <div className="flex h-screen bg-bg-primary overflow-hidden">
-      <Sidebar
-        courses={state.courses}
-        selectedCourseId={selectedCourse?.id}
-        reorderMode={reorderMode}
-        onToggleReorder={() => setReorderMode((v) => !v)}
-        onMoveCourse={handleMoveCourse}
-        onRequestDeleteCourse={handleRequestDeleteCourse}
-        onSelectCourse={(c) => {
-          setSelectedCourse(c);
-          setSelectedLecture(null);
-          setSelectedTopic(null);
-          setView('course');
-        }}
-        onImportPdf={handleImportPdf}
-        onOpenSettings={() => setView('settings')}
-        onGoHome={() => {
-          setView('home');
-          setSelectedCourse(null);
-          setSelectedLecture(null);
-          setSelectedTopic(null);
-        }}
-      />
+      <SidebarShell hidden={sidebarHidden} onToggle={toggleSidebar}>
+        <Sidebar
+          courses={state.courses}
+          selectedCourseId={selectedCourse?.id}
+          reorderMode={reorderMode}
+          onToggleReorder={() => setReorderMode((v) => !v)}
+          onMoveCourse={handleMoveCourse}
+          onRequestDeleteCourse={handleRequestDeleteCourse}
+          onSelectCourse={(c) => {
+            setSelectedCourse(c);
+            setSelectedLecture(null);
+            setSelectedTopic(null);
+            setView('course');
+          }}
+          onImportPdf={handleImportPdf}
+          onOpenSettings={() => setView('settings')}
+          onGoHome={() => {
+            setView('home');
+            setSelectedCourse(null);
+            setSelectedLecture(null);
+            setSelectedTopic(null);
+            setDashboardKey((k) => k + 1);
+          }}
+        />
+      </SidebarShell>
 
-      <main className="flex-1 overflow-hidden">
+      <main className="flex-1 overflow-hidden relative">
         {view === 'home' && (
           <HomePage
+            key={dashboardKey}
             courses={state.courses}
+            refreshKey={dashboardKey}
+            onOpenTarget={handleDashboardNavigate}
             onSelectCourse={(c) => {
               setSelectedCourse(c);
               setView('course');
@@ -285,6 +423,8 @@ export default function App() {
             refreshKey={lectureRefreshKey}
             onOpenLecture={(lec) => {
               setSelectedLecture(lec);
+              setMaterialMode('lecture');
+              setSelectedExerciseId('');
               setView('lecture');
             }}
             onBack={() => setView('home')}
@@ -306,13 +446,40 @@ export default function App() {
         )}
         {view === 'lecture' && (
           <LecturePage
-            key={`${selectedLecture?.path}-${notesRefreshKey}`}
+            key={`${selectedLecture?.path}-${notesRefreshKey}-${lectureContentKey}`}
             course={selectedCourse}
             lectureMeta={selectedLecture}
             hasApiKey={Boolean(state.apiKey)}
-            onOpenTopic={(lecture, topic) => {
+            materialMode={materialMode}
+            exerciseId={selectedExerciseId}
+            onMaterialModeChange={(mode) => {
+              setMaterialMode(mode);
+              if (mode === 'exercise' && selectedLecture) {
+                const sheets = getExerciseSheets(selectedLecture);
+                if (sheets.length && !selectedExerciseId) {
+                  setSelectedExerciseId(sheets[0].id);
+                }
+              }
+            }}
+            onExerciseIdChange={setSelectedExerciseId}
+            onAttachExercise={handleAttachExercise}
+            openNotesView={openLectureNotes}
+            onNotesViewConsumed={() => setOpenLectureNotes(false)}
+            pendingOpenNoteId={pendingOpenNoteId}
+            onPendingNoteConsumed={() => setPendingOpenNoteId(null)}
+            returnViewAfterNote={returnViewAfterNote}
+            onReturnAfterNote={() => {
+              if (returnViewAfterNote === 'topic' && selectedTopic) {
+                setView('topic');
+              }
+              setReturnViewAfterNote(null);
+            }}
+            onOpenTopic={(lecture, topic, mode, options) => {
               setSelectedLecture(lecture);
               setSelectedTopic(topic);
+              setMaterialMode(mode || 'lecture');
+              if (options?.exerciseId) setSelectedExerciseId(options.exerciseId);
+              setPendingFocusSubtopicId(options?.subtopicId || null);
               setView('topic');
             }}
             onOpenSourceItem={async (sourcePath) => {
@@ -324,6 +491,10 @@ export default function App() {
               }
             }}
             onOpenPromotedUnit={openCourseItemById}
+            onPinsChanged={bumpDashboard}
+            onNotify={showToast}
+            sidebarHidden={sidebarHidden}
+            onToggleSidebar={toggleSidebar}
             onBack={() => setView('course')}
           />
         )}
@@ -332,21 +503,84 @@ export default function App() {
             course={selectedCourse}
             lecture={selectedLecture}
             topic={selectedTopic}
+            materialMode={materialMode}
+            exerciseId={selectedExerciseId}
             hasApiKey={Boolean(state.apiKey)}
             notesCount={lectureNotesCount}
-            onBack={() => setView('lecture')}
             onNoteSaved={() => {
               setNotesRefreshKey((k) => k + 1);
-              showToast('Note saved — reopen under Your notes on the lecture page');
+              showToast('Note saved for this topic');
             }}
             onGoToNotes={() => {
+              setOpenLectureNotes(true);
               setView('lecture');
-              setTimeout(() => {
-                document.getElementById('lecture-notes-anchor')?.scrollIntoView({ behavior: 'smooth' });
-              }, 150);
+            }}
+            onOpenSavedNote={(noteId) => {
+              setPendingOpenNoteId(noteId);
+              setReturnViewAfterNote('topic');
+              setView('lecture');
+            }}
+            onOpenExerciseSubtopic={(link) => {
+              if (!link?.exerciseTopicId || !selectedLecture) return;
+              const exTopic = findExerciseTopic(
+                selectedLecture,
+                link.exerciseTopicId,
+                link.exerciseId || ''
+              );
+              if (!exTopic) return;
+              if (materialMode === 'lecture' && selectedTopic?.id) {
+                setReturnLectureTopicId(selectedTopic.id);
+              }
+              setMaterialMode('exercise');
+              setSelectedExerciseId(link.exerciseId || selectedExerciseId || '');
+              setSelectedTopic(exTopic);
+              setPendingExerciseNav({
+                subtopicId: link.exerciseSubtopicId || null
+              });
+              setView('topic');
+            }}
+            onBack={() => {
+              if (returnLectureTopicId && materialMode === 'exercise' && selectedLecture) {
+                const lecTopic = selectedLecture.topics?.find((t) => t.id === returnLectureTopicId);
+                if (lecTopic) {
+                  setSelectedTopic(lecTopic);
+                  setMaterialMode('lecture');
+                  setReturnLectureTopicId(null);
+                  setView('topic');
+                  return;
+                }
+              }
+              setReturnLectureTopicId(null);
+              setView('lecture');
+            }}
+            initialOpenSubtopicId={
+              pendingFocusSubtopicId ||
+              (materialMode === 'exercise' ? pendingExerciseNav?.subtopicId : null) ||
+              null
+            }
+            onInitialSubtopicConsumed={() => {
+              setPendingFocusSubtopicId(null);
+              setPendingExerciseNav(null);
+            }}
+            onTopicStudied={(updated) => {
+              setSelectedLecture(updated);
+              if (selectedTopic?.id) {
+                const topics = getMaterialTopics(updated, materialMode, selectedExerciseId);
+                const fresh = topics?.find((t) => t.id === selectedTopic.id);
+                if (fresh) setSelectedTopic(fresh);
+              }
+              setLectureContentKey((k) => k + 1);
+              bumpDashboard();
+            }}
+            onTopicUpdated={(updatedTopic) => {
+              setSelectedTopic(updatedTopic);
+              setLectureContentKey((k) => k + 1);
             }}
             onPromoteTopic={handlePromoteTopic}
             onOpenPromotedUnit={openCourseItemById}
+            onNotify={showToast}
+            sidebarHidden={sidebarHidden}
+            onToggleSidebar={toggleSidebar}
           />
         )}
         {view === 'settings' && (
@@ -398,6 +632,9 @@ export default function App() {
           onDeleteDisk={() => handleDeleteLecture(true)}
         />
       )}
+
+      <StudyPinOverlay />
     </div>
+    </StudyPinsProvider>
   );
 }

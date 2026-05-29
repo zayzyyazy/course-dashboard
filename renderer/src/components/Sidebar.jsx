@@ -18,7 +18,7 @@ export default function Sidebar({
       <div className="px-4 pb-3 no-drag">
         <button type="button" onClick={onGoHome} className="text-left w-full">
           <p className="text-xs text-text-muted uppercase tracking-wider">Course Dashboard</p>
-          <p className="text-sm font-semibold text-text-primary mt-0.5">Study locally</p>
+          <p className="text-sm font-semibold text-text-primary mt-0.5">Study overview</p>
         </button>
       </div>
 

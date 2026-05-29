@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const vault = require('./vault');
 const lectureStructureLlm = require('./lectureStructureLlm');
+const { contextUsagePreamble } = require('./chatClarify');
 
 function safeRead(filePath, max = 0) {
   try {
@@ -41,28 +42,17 @@ function gatherNoteContext({ lecturePath, courseStorageKey, courseName, note, va
   return { lecture, topic, extracted, concepts, courseContext, siblingLectures };
 }
 
-function buildNoteChatSystem(language) {
-  return `You are a focused study tutor inside Course Dashboard. The student is in **note study mode** — their saved note is the anchor. Answer in ${language}.
-
-CONTEXT PRIORITY (strict):
-1. The opened note (highlight + their words + key ideas) — answer as if helping them understand *this* note
-2. The current topic card and subtopics for that topic
-3. This lecture's source materials (extracted text, concepts)
-4. Other topics in the same lecture (for connections only)
-5. Sibling lectures in the course (prerequisites / what comes next)
-
-RULES:
-- Ground answers in the note first; use lecture materials to support, not replace, the note
-- For formulas, notation, procedures: explain symbols, steps, and meaning clearly; use $...$ for math when helpful
-- Be tutor-like: examples, intuition, "what you might be missing", memory hooks — not generic filler
-- If the note seems wrong or incomplete, say so gently and correct using lecture context
-- Under 320 words unless a derivation or multi-step procedure truly needs more
-- Do not mention JSON, prompts, or "context blocks"`;
+function buildNoteChatSystem(language, answerMode) {
+  const { buildNoteStudySystem } = require('./chatClarify');
+  return buildNoteStudySystem(language, answerMode || 'clarify');
 }
 
 function buildNoteContextBlock({ note, lecture, topic, extracted, concepts, courseContext, siblingLectures, courseName }) {
   const noteBody = note.refinedNote || note.note || '';
   const parts = [
+    contextUsagePreamble(),
+    'Use this context to know what the student already saw — explain differently in chat.',
+    '',
     '=== PRIMARY: OPENED NOTE ===',
     `Topic: ${note.topicTitle || topic?.title || '—'}`,
     `Source: ${note.source === 'deep' ? 'deeper explanation' : 'topic card'}`,
@@ -73,8 +63,8 @@ function buildNoteContextBlock({ note, lecture, topic, extracted, concepts, cour
       ? `Original draft:\n${note.note}`
       : '',
     '',
-    '=== TOPIC CARD (current topic) ===',
-    topic?.card?.markdown ? topic.card.markdown.slice(0, 5500) : '(no card)',
+    '=== TOPIC CARD (reference — do not repeat wording) ===',
+    topic?.card?.markdown ? topic.card.markdown.slice(0, 3500) : '(no card)',
     topic?.card?.deepMarkdown
       ? `\n--- Deeper explanation (excerpt) ---\n${topic.card.deepMarkdown.slice(0, 3500)}`
       : '',

@@ -1,5 +1,6 @@
 import React from 'react';
 import MarkdownView from './MarkdownView';
+import HighlightPreviewText from './HighlightPreviewText';
 
 export default function NoteDetailModal({ note, onClose, onOpenTopic }) {
   if (!note) return null;
@@ -32,8 +33,8 @@ export default function NoteDetailModal({ note, onClose, onOpenTopic }) {
             <p className="text-xs font-medium text-text-muted uppercase tracking-wide mb-2">
               Highlighted from topic card
             </p>
-            <blockquote className="text-sm text-text-secondary border-l-2 border-accent/50 pl-3 italic leading-relaxed">
-              {note.highlightedText}
+            <blockquote className="text-sm text-text-secondary border-l-2 border-accent/50 pl-3">
+              <HighlightPreviewText text={note.highlightedText} />
             </blockquote>
           </div>
 

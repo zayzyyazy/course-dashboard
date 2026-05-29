@@ -8,6 +8,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export default defineConfig({
   plugins: [react()],
   root: path.resolve(__dirname, 'renderer'),
+  resolve: {
+    alias: {
+      '@shared': path.resolve(__dirname, 'shared')
+    }
+  },
+  optimizeDeps: {
+    include: ['../shared/noteMarkdown.cjs']
+  },
   base: './',
   build: {
     outDir: path.resolve(__dirname, 'renderer/dist'),

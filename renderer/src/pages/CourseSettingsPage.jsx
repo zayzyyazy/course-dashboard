@@ -18,9 +18,18 @@ const FOCUS_OPTIONS = [
   { value: 'application', label: 'More application / Aufgaben' }
 ];
 
+const DIFFICULTY_OPTIONS = [
+  { value: 1, label: '1 — Easy for me' },
+  { value: 2, label: '2 — Mostly easy' },
+  { value: 3, label: '3 — Medium' },
+  { value: 4, label: '4 — Quite hard' },
+  { value: 5, label: '5 — Hard for me' }
+];
+
 export default function CourseSettingsPage({ course, onBack, onSaved }) {
   const [name, setName] = useState('');
   const [profile, setProfile] = useState(null);
+  const [studyMeta, setStudyMeta] = useState({ examDate: '', ects: '', personalDifficulty: 3 });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
@@ -32,6 +41,12 @@ export default function CourseSettingsPage({ course, onBack, onSaved }) {
       if (res.success) {
         setName(res.course.name);
         setProfile(res.aiProfile);
+        const m = res.studyMeta || {};
+        setStudyMeta({
+          examDate: m.examDate || '',
+          ects: m.ects != null ? String(m.ects) : '',
+          personalDifficulty: m.personalDifficulty ?? 3
+        });
       }
       setLoading(false);
     });
@@ -39,6 +54,10 @@ export default function CourseSettingsPage({ course, onBack, onSaved }) {
 
   function setField(key, value) {
     setProfile((p) => ({ ...p, [key]: value }));
+  }
+
+  function setMetaField(key, value) {
+    setStudyMeta((m) => ({ ...m, [key]: value }));
   }
 
   async function handleSave(e) {
@@ -49,7 +68,12 @@ export default function CourseSettingsPage({ course, onBack, onSaved }) {
     const res = await window.api.saveCourseSettings({
       courseId: course.id,
       name: name.trim(),
-      aiProfile: profile
+      aiProfile: profile,
+      studyMeta: {
+        examDate: studyMeta.examDate.trim(),
+        ects: studyMeta.ects === '' ? null : Number(studyMeta.ects),
+        personalDifficulty: Number(studyMeta.personalDifficulty)
+      }
     });
     setSaving(false);
     if (res.success) {
@@ -84,6 +108,52 @@ export default function CourseSettingsPage({ course, onBack, onSaved }) {
           </p>
 
           <form onSubmit={handleSave} className="space-y-5">
+            <div className="rounded-lg border border-accent/25 bg-accent/5 p-4 space-y-4">
+              <p className="text-xs font-medium text-accent uppercase tracking-wide">
+                Study dashboard (prioritization)
+              </p>
+              <label className="block">
+                <span className="text-xs text-text-muted uppercase tracking-wide">Exam date</span>
+                <input
+                  type="date"
+                  value={studyMeta.examDate}
+                  onChange={(e) => setMetaField('examDate', e.target.value)}
+                  className="mt-1 w-full bg-bg-tertiary border border-border-DEFAULT rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent"
+                />
+              </label>
+              <label className="block">
+                <span className="text-xs text-text-muted uppercase tracking-wide">
+                  Leistungspunkte / ECTS
+                </span>
+                <input
+                  type="number"
+                  min="0.5"
+                  max="30"
+                  step="0.5"
+                  value={studyMeta.ects}
+                  onChange={(e) => setMetaField('ects', e.target.value)}
+                  placeholder="e.g. 6"
+                  className="mt-1 w-full bg-bg-tertiary border border-border-DEFAULT rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent"
+                />
+              </label>
+              <label className="block">
+                <span className="text-xs text-text-muted uppercase tracking-wide">
+                  Difficulty for you personally
+                </span>
+                <select
+                  value={studyMeta.personalDifficulty}
+                  onChange={(e) => setMetaField('personalDifficulty', Number(e.target.value))}
+                  className="mt-1 w-full bg-bg-tertiary border border-border-DEFAULT rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent"
+                >
+                  {DIFFICULTY_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
             <label className="block">
               <span className="text-xs text-text-muted uppercase tracking-wide">Course name</span>
               <input

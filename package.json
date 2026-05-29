@@ -7,8 +7,10 @@
     "dev": "concurrently \"npm run dev:vite\" \"npm run dev:electron\"",
     "dev:vite": "vite",
     "dev:electron": "wait-on http://localhost:5174 && electron .",
-    "build": "vite build && electron-builder",
-    "build:renderer": "vite build"
+    "build": "vite build && electron-builder --mac dir",
+    "build:renderer": "vite build",
+    "deploy:desktop": "npm run build && rm -rf \"/Users/zay/Desktop/Course Dashboard.app\" && cp -R \"dist-app/mac-arm64/Course Dashboard.app\" \"/Users/zay/Desktop/Course Dashboard.app\" && xattr -cr \"/Users/zay/Desktop/Course Dashboard.app\"",
+    "package:mac-zip": "npm run build && mkdir -p release/mac && rm -rf release/mac && cp -R \"dist-app/mac-arm64/Course Dashboard.app\" release/mac/ && cp release/INSTALL-Mac.txt release/mac/ && cd release && rm -f Course-Dashboard-mac.zip && zip -r Course-Dashboard-mac.zip mac && cp Course-Dashboard-mac.zip \"/Users/zay/Desktop/Course-Dashboard-mac.zip\""
   },
   "dependencies": {
     "electron-store": "^8.1.0",
@@ -41,6 +43,7 @@
     },
     "files": [
       "main/**/*",
+      "shared/**/*",
       "renderer/dist/**/*",
       "node_modules/**/*",
       "package.json",

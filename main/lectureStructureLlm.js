@@ -4,6 +4,7 @@
 const fs = require('fs');
 const path = require('path');
 const topicExtraction = require('./topicExtraction');
+const { normalizeDepth } = require('../shared/studyDepth.cjs');
 
 const STRUCTURE_SOURCE = 'llm';
 const MAX_MAIN_TOPICS = 6;
@@ -103,7 +104,8 @@ OUTPUT SHAPE (exact keys):
     {
       "title": "main topic",
       "importance": "core|supporting|foundation",
-      "subtopics": [{"title": "concrete subtopic"}],
+      "studyDepth": "low|medium|high|examHeavy",
+      "subtopics": [{"title": "concrete subtopic", "studyDepth": "low|medium|high|examHeavy"}],
       "connections": {
         "buildsOn": ["topic or lecture idea"],
         "continuesIn": ["topic or lecture idea"],
@@ -125,6 +127,26 @@ TOPIC RULES:
 - Subtopics must be concrete, learnable checklist items actually covered in the lecture.
 - Labels: short (2-8 words), study-usable, no slide noise, no full sentences.
 - importance: "core" for central ideas, "supporting" for secondary, "foundation" for prerequisites taught here.
+
+SUBTOPIC RECOGNITION (conservative — do not inflate count):
+- Prefer 2-${MAX_SUBTOPICS} subtopics when the lecture clearly breaks a topic into internal parts; 0-1 is fine if the topic is atomic.
+- Include a subtopic only when the source: names it as a distinct part, repeats it, explains it beyond a single mention, uses it in an example, walks through a formula/step with it, or treats it as a component of the parent topic.
+- Skip: passing mentions, bare slide headers, synonyms of the parent title, overly narrow fragments, decorative labels.
+- Subtopic titles: 2-7 words, specific internal unit — not a duplicate of the parent topic.
+
+FOCUS LEVEL (estimate — how much attention you likely need; not exam truth; per topic AND subtopic):
+- low: lightly treated; mostly recognition/surface familiarity — do not over-invest time
+- medium: should be understood reasonably well; worth studying, but not likely the deepest part
+- high: clearly important in the lecture; likely central for understanding and continuation
+- examHeavy: likely important for application, exercises, procedures, formulas, calculations, or stronger exam relevance
+
+Signals: space in the lecture, repetition, examples, worked steps, formulas, procedural/operational use, whether later topics build on it.
+
+Be conservative: most items should be low or medium; use high only when importance is clearly established; use examHeavy only when formulas/procedures/calculations/structured steps are central.
+
+Technical subjects (statistics, math, programming, technical digital-media):
+- Use examHeavy when the lecture is formula-driven, procedure-heavy, or explicitly operational (e.g. steps/workflows) and this is needed for exercises/solutions.
+- Do NOT label light conceptual mentions as examHeavy.
 
 QUANTITATIVE / TECHNICAL LECTURES (statistics, mathematics, programming, quantitative methods):
 - When formulas, notation, tests, algorithms, or computation steps are central, they MUST appear in the structure — not only as vague theory.
@@ -233,7 +255,10 @@ function validateAndNormalizeTopics(raw, lectureTitle) {
       const subTitle = topicExtraction.normalizeTopicLabel(sub.title || sub);
       if (!subTitle || topicExtraction.isStructuralHeading(subTitle)) continue;
       if (subtopics.some((s) => topicExtraction.areNearDuplicate(s.title, subTitle))) continue;
-      subtopics.push({ title: subTitle });
+      subtopics.push({
+        title: subTitle,
+        studyDepth: normalizeDepth(sub.studyDepth)
+      });
     }
 
     if (topics.some((t) => topicExtraction.areNearDuplicate(t.title, title))) continue;
@@ -242,6 +267,7 @@ function validateAndNormalizeTopics(raw, lectureTitle) {
       importance: ['core', 'supporting', 'foundation'].includes(topic.importance)
         ? topic.importance
         : 'core',
+      studyDepth: normalizeDepth(topic.studyDepth),
       subtopics,
       connections: {
         buildsOn: Array.isArray(topic.connections?.buildsOn)

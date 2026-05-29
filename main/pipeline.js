@@ -5,6 +5,11 @@ const vault = require('./vault');
 const lectureStructureLlm = require('./lectureStructureLlm');
 const lectureNormalize = require('./lectureNormalize');
 const topicCardsLlm = require('./topicCardsLlm');
+const exerciseSheets = require('../shared/exerciseSheets.cjs');
+const exerciseStructureLlm = require('./exerciseStructureLlm');
+const exerciseTopicCardsLlm = require('./exerciseTopicCardsLlm');
+const exerciseLinksLlm = require('./exerciseLinksLlm');
+const { applySubtopicExerciseLinks } = require('../shared/subtopicExerciseLink.cjs');
 
 function makeLectureFolderId(pdfBaseName) {
   const base = pdfBaseName
@@ -182,4 +187,147 @@ function inferDomain(courseName, text) {
   return 'general university lecture — include formulas and procedures when the source material makes them central';
 }
 
-module.exports = { processLecturePdf, inferDomain };
+function structureToExerciseLayer(structure, meta) {
+  const { makeId } = lectureNormalize;
+  return {
+    title: structure.exerciseTitle || meta.title || 'Übung',
+    exerciseSummary: structure.exerciseSummary,
+    sourcePdf: meta.sourcePdf,
+    processedAt: new Date().toISOString(),
+    topics: structure.topics.map((t, ti) => ({
+      id: makeId('ex', t.title, ti),
+      title: t.title,
+      importance: t.importance,
+      practiceFocus: t.practiceFocus || '',
+      problemTypes: t.problemTypes || [],
+      procedures: t.procedures || [],
+      subtopics: t.subtopics || [],
+      card: null,
+      studyState: 'new'
+    })),
+    lectureLinks: [],
+    studyState: { opened: false, lastOpenedAt: null, topicsStudied: 0 }
+  };
+}
+
+async function processExercisePdf({
+  lecturePath,
+  pdfPath,
+  courseName,
+  courseStorageKey,
+  courseProfileBlock,
+  vaultPath,
+  apiKey,
+  model,
+  temperature,
+  onStatus
+}) {
+  if (!apiKey) {
+    const err = new Error('API key required — add in Settings');
+    err.code = 'NO_API_KEY';
+    throw err;
+  }
+
+  const lecture = vault.readCourseItem(lecturePath);
+  if (!lecture) {
+    throw new Error('Lecture not found');
+  }
+
+  const send = (message) => onStatus?.({ message });
+
+  send('Extracting exercise PDF…');
+  const { extractedText, pdfBaseName } = await extractPdfText(pdfPath);
+  const language = detectLanguage(extractedText);
+  const domainHint = inferDomain(courseName, `${extractedText}\n${lecture.lectureSummary || ''}`);
+
+  exerciseSheets.normalizeLectureExercises(lecture);
+  const sheetIndex = lecture.exercises.length;
+  const { makeId } = require('./lectureNormalize');
+  const sheetId = makeId('exsheet', pdfBaseName, sheetIndex);
+  const extractedFile = exerciseSheets.extractedFileName(sheetId, sheetIndex);
+  const exercisePdfName = `exercise_${sheetId}_${path.basename(pdfPath)}`;
+  fs.writeFileSync(path.join(lecturePath, extractedFile), extractedText, 'utf8');
+  fs.copyFileSync(pdfPath, path.join(lecturePath, exercisePdfName));
+
+  const { OpenAI } = require('openai');
+  const openai = new OpenAI({ apiKey });
+  const callLlm = async (system, user) => {
+    const response = await openai.chat.completions.create({
+      model,
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: user }
+      ],
+      temperature,
+      response_format: { type: 'json_object' }
+    });
+    return (response.choices?.[0]?.message?.content || '').trim();
+  };
+
+  send('Building exercise structure (AI)…');
+  const structResult = await exerciseStructureLlm.extractExerciseStructureWithLlm({
+    lecturePath,
+    lectureTitle: lecture.title,
+    lectureTopics: lecture.topics || [],
+    outputLanguage: language,
+    callLlm
+  });
+
+  if (!structResult.ok) {
+    throw new Error(structResult.error || 'Exercise structure failed');
+  }
+
+  let exerciseLayer = structureToExerciseLayer(structResult.structure, {
+    title: normalizeLectureName(pdfBaseName, extractedText),
+    sourcePdf: exercisePdfName
+  });
+  exerciseLayer.id = sheetId;
+  exerciseLayer.label = exerciseSheets.nextSheetLabel(lecture);
+  exerciseLayer.extractedFile = extractedFile;
+
+  send('Writing exercise practice cards…');
+  const cardsResult = await exerciseTopicCardsLlm.generateExerciseTopicCards({
+    extracted: extractedText,
+    exerciseLayer,
+    lectureTitle: lecture.title,
+    lectureSummary: lecture.lectureSummary || lecture.summary,
+    outputLanguage: language,
+    domainHint,
+    courseProfileBlock,
+    callLlm
+  });
+
+  if (!cardsResult.ok) {
+    throw new Error(cardsResult.error || 'Exercise cards failed');
+  }
+
+  exerciseLayer = exerciseTopicCardsLlm.applyCardsToExercise(exerciseLayer, cardsResult.cards);
+
+  send('Linking exercise to lecture topics…');
+  const linksResult = await exerciseLinksLlm.generateExerciseLectureLinks({
+    lectureTopics: lecture.topics || [],
+    exerciseTopics: exerciseLayer.topics,
+    lectureSummary: lecture.lectureSummary,
+    exerciseSummary: exerciseLayer.exerciseSummary,
+    outputLanguage: language,
+    callLlm
+  });
+
+  if (linksResult.ok) {
+    exerciseLayer = exerciseLinksLlm.attachLinksToTopics(exerciseLayer, linksResult.links);
+  }
+
+  exerciseSheets.appendExerciseSheet(lecture, exerciseLayer);
+  applySubtopicExerciseLinks(lecture);
+  vault.writeCourseItem(lecturePath, lecture);
+
+  send('Done');
+  return {
+    success: true,
+    lecturePath,
+    exerciseId: sheetId,
+    lecture: { ...lecture, path: lecturePath, hasExercise: true }
+  };
+}
+
+module.exports = { processLecturePdf, processExercisePdf, inferDomain };

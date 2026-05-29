@@ -16,33 +16,96 @@ const DEFAULT_PROFILE = {
   extraInstructions: ''
 };
 
+/** Per-course prioritization metadata for the study dashboard (not used by AI prompts). */
+const DEFAULT_STUDY_META = {
+  examDate: '',
+  ects: null,
+  personalDifficulty: 3
+};
+
 const MATH_OUTPUT_HINT = `For mathematical notation use $...$ for inline math and $$...$$ for display equations. Do not use \\( \\) or \\[ \\] delimiters. Write valid LaTeX inside delimiters (e.g. $\\mathbb{N}$, $\\frac{a}{b}$).`;
 
 function settingsPath(vaultPath, storageKey) {
   return path.join(vault.courseDir(vaultPath, storageKey), SETTINGS_FILE);
 }
 
+function readSettingsFile(vaultPath, storageKey) {
+  if (!vaultPath || !storageKey) return null;
+  try {
+    return JSON.parse(fs.readFileSync(settingsPath(vaultPath, storageKey), 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
 function loadProfile(vaultPath, storageKey) {
   const defaults = { ...DEFAULT_PROFILE };
-  if (!vaultPath || !storageKey) return defaults;
-  try {
-    const data = JSON.parse(fs.readFileSync(settingsPath(vaultPath, storageKey), 'utf8'));
-    return { ...defaults, ...(data.aiProfile || data) };
-  } catch {
-    return defaults;
+  const data = readSettingsFile(vaultPath, storageKey);
+  if (!data) return defaults;
+  return { ...defaults, ...(data.aiProfile || data) };
+}
+
+function normalizeStudyMeta(raw) {
+  const meta = { ...DEFAULT_STUDY_META, ...(raw || {}) };
+  const examDate = String(meta.examDate || '').trim();
+  let ects = meta.ects;
+  if (ects != null && ects !== '') {
+    const n = Number(ects);
+    ects = Number.isFinite(n) && n > 0 ? Math.min(30, Math.round(n * 2) / 2) : null;
+  } else {
+    ects = null;
   }
+  let personalDifficulty = Number(meta.personalDifficulty);
+  if (!Number.isFinite(personalDifficulty)) personalDifficulty = 3;
+  personalDifficulty = Math.min(5, Math.max(1, Math.round(personalDifficulty)));
+  return { examDate, ects, personalDifficulty };
+}
+
+function loadStudyMeta(vaultPath, storageKey) {
+  const data = readSettingsFile(vaultPath, storageKey);
+  return normalizeStudyMeta(data?.studyMeta);
 }
 
 function saveProfile(vaultPath, storageKey, aiProfile) {
   const dir = vault.courseDir(vaultPath, storageKey);
   fs.mkdirSync(dir, { recursive: true });
+  const existing = readSettingsFile(vaultPath, storageKey) || {};
   const payload = {
     version: 1,
     aiProfile: { ...DEFAULT_PROFILE, ...aiProfile },
+    studyMeta: normalizeStudyMeta(existing.studyMeta),
     updatedAt: new Date().toISOString()
   };
   fs.writeFileSync(settingsPath(vaultPath, storageKey), JSON.stringify(payload, null, 2), 'utf8');
   return payload.aiProfile;
+}
+
+function saveStudyMeta(vaultPath, storageKey, studyMeta) {
+  const dir = vault.courseDir(vaultPath, storageKey);
+  fs.mkdirSync(dir, { recursive: true });
+  const existing = readSettingsFile(vaultPath, storageKey) || {};
+  const payload = {
+    version: 1,
+    aiProfile: { ...DEFAULT_PROFILE, ...(existing.aiProfile || {}) },
+    studyMeta: normalizeStudyMeta(studyMeta),
+    updatedAt: new Date().toISOString()
+  };
+  fs.writeFileSync(settingsPath(vaultPath, storageKey), JSON.stringify(payload, null, 2), 'utf8');
+  return payload.studyMeta;
+}
+
+function saveCourseSettingsBundle(vaultPath, storageKey, { aiProfile, studyMeta }) {
+  const dir = vault.courseDir(vaultPath, storageKey);
+  fs.mkdirSync(dir, { recursive: true });
+  const existing = readSettingsFile(vaultPath, storageKey) || {};
+  const payload = {
+    version: 1,
+    aiProfile: aiProfile != null ? { ...DEFAULT_PROFILE, ...aiProfile } : { ...DEFAULT_PROFILE, ...(existing.aiProfile || {}) },
+    studyMeta: studyMeta != null ? normalizeStudyMeta(studyMeta) : normalizeStudyMeta(existing.studyMeta),
+    updatedAt: new Date().toISOString()
+  };
+  fs.writeFileSync(settingsPath(vaultPath, storageKey), JSON.stringify(payload, null, 2), 'utf8');
+  return { aiProfile: payload.aiProfile, studyMeta: payload.studyMeta };
 }
 
 function buildPromptBlock(profile, courseDisplayName) {
@@ -74,8 +137,13 @@ function buildPromptBlock(profile, courseDisplayName) {
 module.exports = {
   SETTINGS_FILE,
   DEFAULT_PROFILE,
+  DEFAULT_STUDY_META,
   MATH_OUTPUT_HINT,
   loadProfile,
+  loadStudyMeta,
   saveProfile,
+  saveStudyMeta,
+  saveCourseSettingsBundle,
+  normalizeStudyMeta,
   buildPromptBlock
 };

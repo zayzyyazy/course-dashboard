@@ -6,10 +6,17 @@ const vault = require('./vault');
 const pipeline = require('./pipeline');
 const coursesApi = require('./courses');
 const lectureNotes = require('./lectureNotes');
+const noteStudyAppend = require('./noteStudyAppend');
+const noteAutoSave = require('./noteAutoSave');
 const noteChat = require('./noteChat');
+const chatClarify = require('./chatClarify');
+const noteRelevance = require('../shared/noteRelevance.cjs');
 const studyUnits = require('./studyUnits');
 const courseProfile = require('./courseProfile');
+const dashboard = require('./dashboard');
 const { detectLanguage } = require('./pdf');
+const noteLanguage = require('./noteLanguage');
+const expandContent = require('./expandContent');
 
 const store = new Store({
   schema: {
@@ -98,12 +105,60 @@ function safeRead(filePath) {
   }
 }
 
-function getExtractedForItem(itemPath, item) {
+const exerciseSheets = require('../shared/exerciseSheets.cjs');
+
+function getExtractedForItem(itemPath, item, materialMode = 'lecture', exerciseId = '') {
+  if (materialMode === 'exercise') {
+    const sheet = exerciseSheets.getExerciseSheet(item, exerciseId);
+    if (sheet?.extractedFile) {
+      const named = safeRead(path.join(itemPath, sheet.extractedFile));
+      if (named) return named;
+    }
+    const ex = safeRead(path.join(itemPath, 'exercise_extracted.txt'));
+    if (ex) return ex;
+  }
   let extracted = safeRead(path.join(itemPath, 'extracted.txt'));
   if (!extracted && item?.source?.lecturePath) {
     extracted = safeRead(path.join(item.source.lecturePath, 'extracted.txt'));
   }
   return extracted;
+}
+
+/** Notes pipeline: prefer highlight/topic language over PDF extraction alone. */
+function resolveNotesPipelineLanguage(lecturePath, lecture, materialMode, data = {}) {
+  const extracted = getExtractedForItem(
+    lecturePath,
+    lecture,
+    materialMode || 'lecture',
+    data.exerciseId || ''
+  );
+  return noteLanguage.resolveNoteLanguage({
+    lectureTitle: lecture?.title,
+    lectureSummary: lecture?.lectureSummary || lecture?.summary,
+    topicTitle: data.topicTitle,
+    highlightedText: data.highlightedText,
+    draftNote: data.draftNote,
+    note: data.note,
+    extractedText: extracted
+  });
+}
+
+function getTopicsForMode(item, materialMode = 'lecture', exerciseId = '') {
+  if (materialMode === 'exercise') {
+    return exerciseSheets.getExerciseTopics(item, exerciseId);
+  }
+  return item?.topics || [];
+}
+
+function findTopicForMode(item, topicId, materialMode = 'lecture', exerciseId = '') {
+  if (materialMode === 'exercise') {
+    return exerciseSheets.findExerciseTopicInLecture(item, topicId, exerciseId).topic;
+  }
+  return (item?.topics || []).find((t) => t.id === topicId);
+}
+
+function findSubtopicInTopic(topic, subtopicId) {
+  return (topic?.subtopics || []).find((s) => s.id === subtopicId);
 }
 
 function resolveStorageKey(ref) {
@@ -142,6 +197,16 @@ ipcMain.handle('dialog:openPdf', async () => {
   return result.filePaths[0];
 });
 
+ipcMain.handle('dialog:openExercisePdf', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile'],
+    filters: [{ name: 'PDF', extensions: ['pdf'] }],
+    title: 'Select exercise / Übung PDF'
+  });
+  if (result.canceled || !result.filePaths.length) return null;
+  return result.filePaths[0];
+});
+
 ipcMain.handle('courses:list', () => coursesApi.listOrderedCourses(store));
 
 ipcMain.handle('courses:create', (_, data) => coursesApi.createCourse(store, data));
@@ -161,6 +226,8 @@ ipcMain.handle('courses:reorder', (_, { courseIds }) => {
 ipcMain.handle('courses:delete', (_, { courseId, deleteFromDisk }) => {
   return coursesApi.deleteCourse(store, courseId, { deleteFromDisk: Boolean(deleteFromDisk) });
 });
+
+ipcMain.handle('dashboard:getOverview', () => dashboard.buildDashboardOverview(store));
 
 ipcMain.handle('courses:getSettings', (_, courseId) => coursesApi.getCourseSettings(store, courseId));
 
@@ -254,8 +321,39 @@ ipcMain.handle('lecture:markOpened', (_, lecturePath) => {
   return vault.markLectureOpened(lecturePath);
 });
 
-ipcMain.handle('lecture:markTopicStudied', (_, { lecturePath, topicId }) => {
-  return vault.markTopicStudied(lecturePath, topicId);
+ipcMain.handle('lecture:markTopicStudied', (_, { lecturePath, topicId, materialMode, exerciseId }) => {
+  const updated = vault.toggleTopicStudied(
+    lecturePath,
+    topicId,
+    materialMode || 'lecture',
+    exerciseId || ''
+  );
+  if (!updated) return null;
+  return { ...vault.enrichItem(updated, lecturePath), path: lecturePath };
+});
+
+ipcMain.handle('lecture:toggleSubtopicStudied', (_, { lecturePath, topicId, subtopicId, materialMode, exerciseId }) => {
+  if (!lecturePath || !topicId || !subtopicId) return null;
+  const updated = vault.toggleSubtopicStudied(
+    lecturePath,
+    topicId,
+    subtopicId,
+    materialMode || 'lecture',
+    exerciseId || ''
+  );
+  if (!updated) return null;
+  const fresh = vault.readCourseItem(lecturePath);
+  const item = fresh || updated;
+  return { ...vault.enrichItem(item, lecturePath), path: lecturePath };
+});
+
+ipcMain.handle('lecture:cycleSubtopicConfidence', async (_, { lecturePath, topicId, subtopicId }) => {
+  if (!lecturePath || !topicId || !subtopicId) return null;
+  const updated = vault.cycleSubtopicConfidence(lecturePath, topicId, subtopicId);
+  if (!updated) return null;
+  const fresh = vault.readCourseItem(lecturePath);
+  const item = fresh || updated;
+  return { ...vault.enrichItem(item, lecturePath), path: lecturePath };
 });
 
 ipcMain.handle('lecture:listNotes', (_, { lecturePath }) => {
@@ -274,9 +372,224 @@ ipcMain.handle('lecture:saveHighlightNote', (_, data) => {
   }
 });
 
+ipcMain.handle('lecture:autoSaveHighlightNote', async (_, data) => {
+  const apiKey = store.get('apiKey');
+  if (!apiKey) return { success: false, error: 'Missing API key' };
+  const {
+    lecturePath,
+    highlightedText,
+    topicId,
+    topicTitle,
+    subtopicId,
+    subtopicTitle,
+    sectionAnchor,
+    sourceKind,
+    markdownSource,
+    noteId,
+    source,
+    materialMode,
+    courseName,
+    courseId,
+    courseStorageKey
+  } = data || {};
+  if (!lecturePath || !highlightedText) {
+    return { success: false, error: 'Missing highlight' };
+  }
+
+  const lecture = vault.readCourseItem(lecturePath);
+  const { language } = resolveNotesPipelineLanguage(lecturePath, lecture, materialMode || 'lecture', {
+    topicTitle,
+    highlightedText,
+    exerciseId: data.exerciseId || ''
+  });
+  const ctx = aiCourseContext({ courseId, courseStorageKey, courseName });
+  const { OpenAI } = require('openai');
+  const openai = new OpenAI({ apiKey });
+
+  try {
+    return await noteAutoSave.autoSaveHighlight({
+      lecturePath,
+      highlightedText,
+      topicId,
+      topicTitle,
+      subtopicId,
+      subtopicTitle,
+      sectionAnchor,
+      sourceKind,
+      markdownSource,
+      noteId,
+      source: source || 'card',
+      materialMode: materialMode || 'lecture',
+      lecture,
+      language,
+      courseBlock: ctx.block,
+      mathHint: courseProfile.MATH_OUTPUT_HINT,
+      openai,
+      model: getModel()
+    });
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('lecture:appendToNoteFromStudy', async (_, data) => {
+  const apiKey = store.get('apiKey');
+  if (!apiKey) return { success: false, error: 'Missing API key' };
+
+  const { lecturePath, noteId, excerpt, isSelection, note, courseName, courseId, courseStorageKey } =
+    data || {};
+  if (!lecturePath || !noteId || !excerpt?.trim()) {
+    return { success: false, error: 'Missing note or content' };
+  }
+
+  const lecture = vault.readCourseItem(lecturePath);
+  const { language, locale } = resolveNotesPipelineLanguage(lecturePath, lecture, 'lecture', {
+    note: note || {}
+  });
+  const ctx = aiCourseContext({ courseId, courseStorageKey, courseName });
+
+  let sectionLabel = noteStudyAppend.defaultSectionLabel(locale);
+  let content = noteStudyAppend.fallbackContent(excerpt);
+
+  try {
+    const { OpenAI } = require('openai');
+    const openai = new OpenAI({ apiKey });
+    const integrated = await noteStudyAppend.integrateExcerpt({
+      openai,
+      model: getModel(),
+      language,
+      courseBlock: ctx.block,
+      note: note || {},
+      excerpt,
+      isSelection: Boolean(isSelection)
+    });
+    if (integrated) {
+      sectionLabel = integrated.sectionLabel;
+      content = integrated.content;
+    }
+  } catch (_) {
+    /* use fallback content */
+  }
+
+  try {
+    return lectureNotes.appendStudyBlock(lecturePath, noteId, { sectionLabel, content });
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('lecture:deleteNoteStudyBlock', (_, { lecturePath, noteId, additionId }) => {
+  try {
+    return lectureNotes.deleteStudyAddition(lecturePath, noteId, additionId);
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
 ipcMain.handle('lecture:deleteNote', (_, { lecturePath, noteId }) => {
   try {
     return lectureNotes.deleteNote(lecturePath, noteId);
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('pins:toggleLecture', (_, { lecturePath }) => {
+  try {
+    if (!lecturePath) return { success: false, error: 'Missing lecture path' };
+    const updated = vault.toggleItemPinned(lecturePath);
+    if (!updated) return { success: false, error: 'Lecture not found' };
+    return { success: true, lecture: { ...vault.enrichItem(updated, lecturePath), path: lecturePath } };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('pins:toggleTopic', (_, { lecturePath, topicId, materialMode, exerciseId }) => {
+  try {
+    if (!lecturePath || !topicId) return { success: false, error: 'Missing topic context' };
+    const updated = vault.toggleTopicPinned(
+      lecturePath,
+      topicId,
+      materialMode || 'lecture',
+      exerciseId || ''
+    );
+    if (!updated) return { success: false, error: 'Topic not found' };
+    return { success: true, lecture: { ...vault.enrichItem(updated, lecturePath), path: lecturePath } };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('pins:toggleSubtopic', (_, { lecturePath, topicId, subtopicId, materialMode, exerciseId }) => {
+  try {
+    if (!lecturePath || !topicId || !subtopicId) return { success: false, error: 'Missing subtopic context' };
+    const updated = vault.toggleSubtopicPinned(
+      lecturePath,
+      topicId,
+      subtopicId,
+      materialMode || 'lecture',
+      exerciseId || ''
+    );
+    if (!updated) return { success: false, error: 'Subtopic not found' };
+    return { success: true, lecture: { ...vault.enrichItem(updated, lecturePath), path: lecturePath } };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('pins:toggleNote', (_, { lecturePath, noteId }) => {
+  try {
+    if (!lecturePath || !noteId) return { success: false, error: 'Missing note context' };
+    return lectureNotes.toggleNotePinned(lecturePath, noteId);
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('pins:listForLecture', (_, { lecturePath }) => {
+  try {
+    if (!lecturePath) return { success: false, error: 'Missing lecture path', items: [] };
+    const items = [...vault.listPinnedInItem(lecturePath), ...lectureNotes.listPinnedNotes(lecturePath)].sort(
+      (a, b) => new Date(b.pinnedAt || 0) - new Date(a.pinnedAt || 0)
+    );
+    return { success: true, items };
+  } catch (err) {
+    return { success: false, error: err.message, items: [] };
+  }
+});
+
+ipcMain.handle('pins:listAll', () => {
+  try {
+    const items = require('./pinsAggregate').collectAllPinned(store);
+    return { success: true, items };
+  } catch (err) {
+    return { success: false, error: err.message, items: [] };
+  }
+});
+
+ipcMain.handle('notes:reorder', (_, { lecturePath, orderedIds, topicId }) => {
+  try {
+    if (!lecturePath) return { success: false, error: 'Missing lecture path' };
+    return lectureNotes.reorderNotes(lecturePath, orderedIds, { topicId });
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('notes:merge', (_, { lecturePath, sourceNoteId, targetNoteId }) => {
+  try {
+    if (!lecturePath) return { success: false, error: 'Missing lecture path' };
+    return lectureNotes.mergeNotes(lecturePath, { sourceNoteId, targetNoteId });
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('lecture:rebuildNoteMetadata', (_, { lecturePath, topicId, forceRetitle }) => {
+  try {
+    if (!lecturePath) return { success: false, error: 'Missing lecture path' };
+    return lectureNotes.rebuildNoteMetadata(lecturePath, { topicId, forceRetitle });
   } catch (err) {
     return { success: false, error: err.message };
   }
@@ -300,18 +613,26 @@ ipcMain.handle('lecture:refineNote', async (_, data) => {
   const { lecturePath, topicTitle, highlightedText, draftNote, courseName, courseId, courseStorageKey } =
     data || {};
   const lecture = vault.readCourseItem(lecturePath);
-  const extracted = getExtractedForItem(lecturePath, lecture);
-  const language = detectLanguage(extracted);
+  const { language } = resolveNotesPipelineLanguage(lecturePath, lecture, 'lecture', {
+    topicTitle,
+    highlightedText,
+    draftNote
+  });
   const ctx = aiCourseContext({ courseId, courseStorageKey, courseName });
 
   const { OpenAI } = require('openai');
   const openai = new OpenAI({ apiKey });
-  const system = `You help a university student sharpen their study notes. Respond in ${language} as strict JSON only:
-{"keyIdeas":["short phrase",...],"refinedNote":"markdown study note"}
+  const system = `You help a university student sharpen their study notes for quick exam revision. Respond in ${language} as strict JSON only:
+{"title":"short note title (3-8 words)","keyIdeas":["short phrase",...],"refinedNote":"markdown study note"}
 Rules:
-- keyIdeas: 2-5 crisp phrases from the highlight + their note (not generic labels)
-- refinedNote: clarify and structure THEIR note for review; keep their meaning; use short markdown (bullets ok); under 220 words unless essential
-- Do not invent facts beyond highlight/context; study-oriented not fluffy
+- title: specific DISTINCT label for scanning a list — capture the actual insight (formula, contrast, step, misconception). NEVER repeat the topic name alone
+- keyIdeas: 2-4 crisp phrases (not generic labels)
+- refinedNote: CONCISE revision note — tighten and clarify THEIR meaning; short bullets or 2-3 tiny sections max
+- Target length: 40-120 words (hard max 140). Do NOT expand into a long essay
+- No filler, no repetition, no generic tutoring voice; faithful to highlight + draft
+- Formulas/notation only when essential; use $...$ for inline math
+- Do not invent facts beyond highlight/context
+${noteLanguage.languagePreservationPrompt(language)}
 ${courseProfile.MATH_OUTPUT_HINT}
 
 ${ctx.block}`;
@@ -333,16 +654,22 @@ ${ctx.block}`;
       ],
       temperature: 0.22,
       response_format: { type: 'json_object' },
-      max_tokens: 900
+      max_tokens: 500
     });
     const parsed = parseRefineJson(response.choices?.[0]?.message?.content || '');
     if (!parsed?.refinedNote) {
       return { success: false, error: 'Could not refine note' };
     }
+    let refinedNote = String(parsed.refinedNote).trim();
+    const words = refinedNote.split(/\s+/).length;
+    if (words > 160) {
+      refinedNote = refinedNote.split(/\s+/).slice(0, 160).join(' ') + '…';
+    }
     return {
       success: true,
-      keyIdeas: Array.isArray(parsed.keyIdeas) ? parsed.keyIdeas : [],
-      refinedNote: String(parsed.refinedNote).trim()
+      title: String(parsed.title || topicTitle || '').trim().slice(0, 120),
+      keyIdeas: Array.isArray(parsed.keyIdeas) ? parsed.keyIdeas.slice(0, 4) : [],
+      refinedNote
     };
   } catch (err) {
     return { success: false, error: err.message };
@@ -353,6 +680,31 @@ ipcMain.handle('lecture:processPdf', async (event, { pdfPath, courseName, course
   try {
     const ctx = aiCourseContext({ courseId, courseStorageKey, courseName });
     const result = await pipeline.processLecturePdf({
+      pdfPath,
+      courseStorageKey: ctx.storageKey,
+      courseName: ctx.displayName,
+      courseProfileBlock: ctx.block,
+      vaultPath: store.get('vaultPath'),
+      apiKey: store.get('apiKey'),
+      model: getModel(),
+      temperature: getTemperature(),
+      onStatus: (status) => {
+        try {
+          if (!event.sender.isDestroyed()) event.sender.send('process:status', status);
+        } catch (_) {}
+      }
+    });
+    return result;
+  } catch (err) {
+    return { success: false, error: err.message, code: err.code };
+  }
+});
+
+ipcMain.handle('lecture:attachExercisePdf', async (event, { lecturePath, pdfPath, courseName, courseId, courseStorageKey }) => {
+  try {
+    const ctx = aiCourseContext({ courseId, courseStorageKey, courseName });
+    const result = await pipeline.processExercisePdf({
+      lecturePath,
       pdfPath,
       courseStorageKey: ctx.storageKey,
       courseName: ctx.displayName,
@@ -393,9 +745,9 @@ ipcMain.handle('lecture:askAboutNote', async (_, data) => {
   if (!ctx) return { success: false, error: 'Lecture not found' };
 
   const item = vault.readCourseItem(lecturePath);
-  const extracted = getExtractedForItem(lecturePath, item);
-  const language = detectLanguage(extracted);
-  const system = `${noteChat.buildNoteChatSystem(language)}\n\n${aiCtx.block}\n${courseProfile.MATH_OUTPUT_HINT}`;
+  const { language } = resolveNotesPipelineLanguage(lecturePath, item, 'lecture', { note });
+  const answerMode = chatClarify.detectAnswerMode(question);
+  const system = `${noteChat.buildNoteChatSystem(language, answerMode)}\n\n${noteLanguage.languagePreservationPrompt(language)}\n\n${aiCtx.block}\n${courseProfile.MATH_OUTPUT_HINT}`;
   const contextBlock = noteChat.buildNoteContextBlock({
     note,
     lecture: ctx.lecture,
@@ -429,14 +781,106 @@ ipcMain.handle('lecture:askAboutNote', async (_, data) => {
     messages.push({ role: 'user', content: question });
   }
 
+  const allNotes = lectureNotes.listNotes(lecturePath);
+  const relevantNotes = noteRelevance.findRelevantNotes(allNotes, question, {
+    topicId: note.topicId || '',
+    materialMode: note.materialMode || 'lecture',
+    excludeNoteId: note.id,
+    limit: 2,
+    minScore: 0.22
+  });
+  const relevantBlock = noteRelevance.buildRelevantNotesContextBlock(relevantNotes, language);
+
   const { OpenAI } = require('openai');
   const openai = new OpenAI({ apiKey });
   try {
+    if (relevantBlock) {
+      messages.splice(messages.length - 1, 0, {
+        role: 'user',
+        content: relevantBlock
+      });
+    }
     const response = await openai.chat.completions.create({
       model: getModel(),
       messages,
-      temperature: 0.28,
-      max_tokens: 1100
+      temperature: chatClarify.temperatureForMode(answerMode),
+      max_tokens: chatClarify.maxTokensForMode(answerMode)
+    });
+    const answer = (response.choices?.[0]?.message?.content || '').trim();
+    if (!answer) return { success: false, error: 'Empty response' };
+    return { success: true, answer, relevantNotes };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('lecture:askAboutSelection', async (_, data) => {
+  const apiKey = store.get('apiKey');
+  if (!apiKey) return { success: false, error: 'Missing API key' };
+
+  const {
+    lecturePath,
+    topicId,
+    question,
+    selectedText,
+    courseName,
+    courseId,
+    courseStorageKey,
+    materialMode,
+    lectureTitle,
+    topicTitle,
+    subtopicTitle,
+    noteTitle,
+    exerciseId: selectionExerciseId
+  } = data || {};
+
+  if (!lecturePath || !question || !selectedText) {
+    return { success: false, error: 'Missing selection or question' };
+  }
+
+  const lecture = vault.readCourseItem(lecturePath);
+  if (!lecture) return { success: false, error: 'Lecture not found' };
+
+  const mode = materialMode === 'exercise' ? 'exercise' : 'lecture';
+  const exerciseId = selectionExerciseId || '';
+  const topic = topicId ? findTopicForMode(lecture, topicId, mode, exerciseId) : null;
+  const { language } = resolveNotesPipelineLanguage(lecturePath, lecture, mode, {
+    topicTitle: topicTitle || topic?.title || '',
+    highlightedText: selectedText,
+    exerciseId
+  });
+  const aiCtx = aiCourseContext({ courseId, courseStorageKey, courseName });
+  const selectionAsk = require('./selectionAsk');
+
+  const answerMode = chatClarify.detectAnswerMode(question);
+  const system = selectionAsk.buildSelectionAskSystem(language, answerMode, mode, {
+    courseProfileBlock: aiCtx.block,
+    mathHint: courseProfile.MATH_OUTPUT_HINT
+  });
+
+  const user = selectionAsk.buildSelectionAskUserMessage({
+    displayName: aiCtx.displayName,
+    lectureTitle: lectureTitle || lecture.title,
+    materialMode: mode,
+    topicTitle: topicTitle || topic?.title || '',
+    subtopicTitle: subtopicTitle || '',
+    noteTitle: noteTitle || '',
+    selectedText,
+    question
+  });
+
+  const { OpenAI } = require('openai');
+  const openai = new OpenAI({ apiKey });
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: getModel(),
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: user }
+      ],
+      temperature: chatClarify.temperatureForMode(answerMode),
+      max_tokens: chatClarify.maxTokensForMode(answerMode)
     });
     const answer = (response.choices?.[0]?.message?.content || '').trim();
     if (!answer) return { success: false, error: 'Empty response' };
@@ -446,32 +890,79 @@ ipcMain.handle('lecture:askAboutNote', async (_, data) => {
   }
 });
 
-ipcMain.handle('lecture:ask', async (_, { lecturePath, topicId, question, courseName, courseId, courseStorageKey }) => {
+ipcMain.handle('lecture:ask', async (_, { lecturePath, topicId, question, courseName, courseId, courseStorageKey, materialMode, exerciseId: askExerciseId }) => {
   const apiKey = store.get('apiKey');
   if (!apiKey) return { success: false, error: 'Missing API key' };
   const lecture = vault.readCourseItem(lecturePath);
   if (!lecture) return { success: false, error: 'Lecture not found' };
-  const topic = lecture.topics?.find((t) => t.id === topicId);
-  const extracted = getExtractedForItem(lecturePath, lecture);
-  const language = detectLanguage(extracted);
+  const mode = materialMode === 'exercise' ? 'exercise' : 'lecture';
+  const exerciseId = askExerciseId || '';
+  const topic = findTopicForMode(lecture, topicId, mode, exerciseId);
+  const extracted = getExtractedForItem(lecturePath, lecture, mode, exerciseId);
+  const { language } = resolveNotesPipelineLanguage(lecturePath, lecture, mode, {
+    topicTitle: topic?.title || '',
+    highlightedText: topic?.card?.markdown?.slice(0, 2000) || '',
+    exerciseId
+  });
   const aiCtx = aiCourseContext({ courseId, courseStorageKey, courseName });
 
   const { OpenAI } = require('openai');
   const openai = new OpenAI({ apiKey });
-  const system = `You are a contextual university tutor inside Course Dashboard. Answer in ${language}. Be clear, concise, and subject-aware. Use lecture structure and topic card when provided. Under 280 words unless math requires more.
-${courseProfile.MATH_OUTPUT_HINT}
 
-${aiCtx.block}`;
+  const answerMode = chatClarify.detectAnswerMode(question);
+
+  const exerciseBlock =
+    mode === 'exercise'
+      ? `Exercise context (reference): ${exerciseSheets.getExerciseSummary(lecture, exerciseId).slice(0, 400)}`
+      : '';
+
+  const system = chatClarify.buildAskTutorSystem(language, answerMode, mode, {
+    courseProfileBlock: `${exerciseBlock}\n${aiCtx.block}`.trim(),
+    mathHint: courseProfile.MATH_OUTPUT_HINT
+  });
+
+  const lectureLinkNote =
+    mode === 'exercise' && topic?.lectureLink?.note
+      ? `Link to lecture topic: ${topic.lectureLink.note}`
+      : '';
+
+  const allNotes = lectureNotes
+    .listNotes(lecturePath)
+    .filter((n) => !materialMode || n.materialMode === materialMode);
+
+  const relevantNotes = noteRelevance.findRelevantNotes(allNotes, question, {
+    topicId: topicId || '',
+    materialMode: mode,
+    limit: 2,
+    minScore: 0.24
+  });
+  const { language: notesLanguage } = resolveNotesPipelineLanguage(lecturePath, lecture, mode, {
+    topicTitle: topic?.title,
+    highlightedText: question
+  });
+  const relevantBlock = noteRelevance.buildRelevantNotesContextBlock(relevantNotes, notesLanguage);
+
   const user = [
+    chatClarify.contextUsagePreamble(),
     `Course: ${aiCtx.displayName}`,
     `Lecture: ${lecture.title}`,
+    `Mode: ${mode === 'exercise' ? 'Übung / exercise practice' : 'Vorlesung / lecture'}`,
     topic ? `Current topic: ${topic.title}` : 'No specific topic selected',
-    `Lecture summary: ${lecture.lectureSummary || lecture.summary || ''}`,
-    topic?.card?.markdown ? `Topic card:\n${topic.card.markdown.slice(0, 6000)}` : '',
-    `Course thread: ${JSON.stringify(lecture.courseThread || {})}`,
-    `All topics: ${(lecture.topics || []).map((t) => t.title).join('; ')}`,
+    lectureLinkNote,
+    mode === 'exercise'
+      ? `Exercise summary (reference): ${exerciseSheets.getExerciseSummary(lecture, exerciseId).slice(0, 800)}`
+      : `Lecture summary (reference, do not recap): ${(lecture.lectureSummary || lecture.summary || '').slice(0, 600)}`,
+    topic?.card?.markdown
+      ? `Topic card (reference — explain differently):\n${topic.card.markdown.slice(0, 4000)}`
+      : '',
+    mode === 'lecture' && lecture.courseThread?.summary
+      ? `Course thread (reference): ${lecture.courseThread.summary.slice(0, 300)}`
+      : '',
+    relevantBlock,
     `Student question: ${question}`
-  ].join('\n\n');
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 
   try {
     const response = await openai.chat.completions.create({
@@ -480,55 +971,147 @@ ${aiCtx.block}`;
         { role: 'system', content: system },
         { role: 'user', content: user }
       ],
-      temperature: 0.25,
-      max_tokens: 900
+      temperature: chatClarify.temperatureForMode(answerMode),
+      max_tokens: chatClarify.maxTokensForMode(answerMode)
     });
     const answer = (response.choices?.[0]?.message?.content || '').trim();
     if (!answer) return { success: false, error: 'Empty response' };
-    return { success: true, answer };
+    return { success: true, answer, relevantNotes };
   } catch (err) {
     return { success: false, error: err.message };
   }
 });
 
-ipcMain.handle('lecture:expandTopic', async (_, { lecturePath, topicId, courseName, courseId, courseStorageKey }) => {
-  const apiKey = store.get('apiKey');
-  if (!apiKey) return { success: false, error: 'Missing API key' };
-  const lecture = vault.readCourseItem(lecturePath);
-  const topic = lecture?.topics?.find((t) => t.id === topicId);
-  if (!topic) return { success: false, error: 'Topic not found' };
-  const extracted = getExtractedForItem(lecturePath, lecture);
-  const language = detectLanguage(extracted);
-  const aiCtx = aiCourseContext({ courseId, courseStorageKey, courseName });
+ipcMain.handle(
+  'lecture:expandTopic',
+  async (_, { lecturePath, topicId, courseName, courseId, courseStorageKey, materialMode, exerciseId, force, feedback }) => {
+    const apiKey = store.get('apiKey');
+    if (!apiKey) return { success: false, error: 'Missing API key' };
+    const lecture = vault.readCourseItem(lecturePath);
+    const mode = materialMode === 'exercise' ? 'exercise' : 'lecture';
+    const topic = findTopicForMode(lecture, topicId, mode, exerciseId || '');
+    if (!topic) return { success: false, error: 'Topic not found' };
 
-  const { OpenAI } = require('openai');
-  const openai = new OpenAI({ apiKey });
-  const system = `Expand this topic with deeper tutor explanation in ${language}. Markdown output.
-Go deeper on mechanisms, examples, notation, comparisons — adaptive, not a rigid template.
-If the topic is statistical, mathematical, or computational: include formulas, symbol meanings, procedure steps, and interpretation when the lecture material supports them.
-${courseProfile.MATH_OUTPUT_HINT}
+    const existing = topic.card?.deepMarkdown || '';
+    if (existing && !force) {
+      return { success: true, markdown: existing, cached: true };
+    }
 
-${aiCtx.block}`;
-  const user = `Lecture: ${lecture.title}\nCourse: ${aiCtx.displayName}\nTopic: ${topic.title}\nExisting card:\n${topic.card?.markdown || ''}\n\nSource excerpt:\n${extracted.slice(0, 25000)}`;
+    const extracted = getExtractedForItem(lecturePath, lecture, mode, exerciseId || '');
+    const language = expandContent.resolveExpandLanguage(
+      lecturePath,
+      lecture,
+      mode,
+      exerciseId || '',
+      topic,
+      null,
+      extracted
+    );
+    const aiCtx = aiCourseContext({ courseId, courseStorageKey, courseName });
 
-  try {
-    const response = await openai.chat.completions.create({
-      model: getModel(),
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: user }
-      ],
-      temperature: 0.28,
-      max_tokens: 1800
+    const { OpenAI } = require('openai');
+    const openai = new OpenAI({ apiKey });
+    const system = expandContent.buildTopicExpandSystem(mode, language, aiCtx);
+    const user = expandContent.buildTopicExpandUser({
+      lecture,
+      aiCtx,
+      mode,
+      topic,
+      extracted,
+      feedback,
+      previousMarkdown: force ? existing : ''
     });
-    const markdown = (response.choices?.[0]?.message?.content || '').trim();
-    if (!markdown) return { success: false, error: 'Empty expansion' };
-    topic.card = topic.card || {};
-    topic.card.deepMarkdown = markdown;
-    topic.card.deepGeneratedAt = new Date().toISOString();
-    vault.writeCourseItem(lecturePath, lecture);
-    return { success: true, markdown };
-  } catch (err) {
-    return { success: false, error: err.message };
+
+    try {
+      const response = await openai.chat.completions.create({
+        model: getModel(),
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: user }
+        ],
+        temperature: 0.28,
+        max_tokens: 1800
+      });
+      const markdown = (response.choices?.[0]?.message?.content || '').trim();
+      if (!markdown) return { success: false, error: 'Empty expansion' };
+      topic.card = topic.card || {};
+      topic.card.deepMarkdown = markdown;
+      topic.card.deepGeneratedAt = new Date().toISOString();
+      vault.writeCourseItem(lecturePath, lecture);
+      return { success: true, markdown };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
   }
-});
+);
+
+ipcMain.handle(
+  'lecture:expandSubtopic',
+  async (
+    _,
+    { lecturePath, topicId, subtopicId, courseName, courseId, courseStorageKey, materialMode, exerciseId, force, feedback }
+  ) => {
+    const apiKey = store.get('apiKey');
+    if (!apiKey) return { success: false, error: 'Missing API key' };
+    const lecture = vault.readCourseItem(lecturePath);
+    const mode = materialMode === 'exercise' ? 'exercise' : 'lecture';
+    const topic = findTopicForMode(lecture, topicId, mode, exerciseId || '');
+    const subtopic = findSubtopicInTopic(topic, subtopicId);
+    if (!topic || !subtopic) return { success: false, error: 'Subtopic not found' };
+
+    const existing = subtopic.deepMarkdown || '';
+    if (existing && !force) {
+      return { success: true, topic, markdown: existing, summary: subtopic.summary || '', cached: true };
+    }
+
+    const extracted = getExtractedForItem(lecturePath, lecture, mode, exerciseId || '');
+    const language = expandContent.resolveExpandLanguage(
+      lecturePath,
+      lecture,
+      mode,
+      exerciseId || '',
+      topic,
+      subtopic,
+      extracted
+    );
+    const aiCtx = aiCourseContext({ courseId, courseStorageKey, courseName });
+
+    const { OpenAI } = require('openai');
+    const openai = new OpenAI({ apiKey });
+    const system = expandContent.buildSubtopicExpandSystem(mode, language, aiCtx);
+    const user = expandContent.buildSubtopicExpandUser({
+      lecture,
+      aiCtx,
+      topic,
+      subtopic,
+      subtopicId,
+      extracted,
+      feedback,
+      previousMarkdown: force ? existing : ''
+    });
+
+    try {
+      const response = await openai.chat.completions.create({
+        model: getModel(),
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: user }
+        ],
+        temperature: 0.28,
+        max_tokens: 1400
+      });
+      const markdown = (response.choices?.[0]?.message?.content || '').trim();
+      if (!markdown) return { success: false, error: 'Empty expansion' };
+
+      const plain = markdown.replace(/[#*_>`]/g, '').replace(/\s+/g, ' ').trim();
+      subtopic.summary = plain.slice(0, 220) + (plain.length > 220 ? '…' : '');
+      subtopic.deepMarkdown = markdown;
+      subtopic.deepGeneratedAt = new Date().toISOString();
+
+      vault.writeCourseItem(lecturePath, lecture);
+      return { success: true, topic, markdown, summary: subtopic.summary };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  }
+);

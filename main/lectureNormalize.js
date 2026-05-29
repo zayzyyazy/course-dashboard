@@ -1,4 +1,5 @@
 const topicExtraction = require('./topicExtraction');
+const { normalizeDepth } = require('../shared/studyDepth.cjs');
 
 function slugify(value) {
   return (value || '')
@@ -23,12 +24,18 @@ function normalizeStructure(raw) {
     const subtopics = (topic.subtopics || []).map((sub, si) => {
       const subTitle = topicExtraction.normalizeTopicLabel(sub.title || sub);
       if (!subTitle || topicExtraction.isStructuralHeading(subTitle)) return null;
-      return { id: sub.id || makeId(`${topicId}-s`, subTitle, si), title: subTitle };
+      return {
+        id: sub.id || makeId(`${topicId}-s`, subTitle, si),
+        title: subTitle,
+        studyDepth: normalizeDepth(sub.studyDepth) || null,
+        studyState: sub.studyState === 'studied' ? 'studied' : 'new'
+      };
     }).filter(Boolean);
     return {
       id: topicId,
       title,
       importance: topic.importance || 'core',
+      studyDepth: normalizeDepth(topic.studyDepth) || null,
       subtopics,
       connections: {
         buildsOn: topic.connections?.buildsOn || [],

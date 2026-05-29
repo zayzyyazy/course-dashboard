@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import TitleWithMath from './TitleWithMath';
 
 export default function DeleteLectureModal({ lecture, folderPath, onRemoveAppOnly, onDeleteDisk, onCancel }) {
   const [confirmDisk, setConfirmDisk] = useState(false);
@@ -25,7 +26,10 @@ export default function DeleteLectureModal({ lecture, folderPath, onRemoveAppOnl
       <div className="bg-bg-secondary border border-border-DEFAULT rounded-xl w-full max-w-md p-6 shadow-xl">
         <h2 className="text-lg font-semibold text-text-primary mb-2">Delete lecture?</h2>
         <p className="text-sm text-text-secondary mb-4">
-          You are about to remove <strong className="text-text-primary">{lecture.title}</strong>.
+          You are about to remove{' '}
+          <strong className="text-text-primary">
+            <TitleWithMath text={lecture.title} />
+          </strong>.
         </p>
 
         {folderPath && (

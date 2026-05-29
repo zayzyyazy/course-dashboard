@@ -32,6 +32,7 @@ extracted-text/
 *.pdf
 
 # Build outputs and packaged apps
+index-*.js
 renderer/dist/
 dist/
 build/

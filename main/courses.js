@@ -160,10 +160,11 @@ function getCourseSettings(store, courseId) {
   if (!course) return { success: false, error: 'Course not found' };
   const vaultPath = store.get('vaultPath');
   const aiProfile = courseProfile.loadProfile(vaultPath, course.storageKey);
-  return { success: true, course, aiProfile };
+  const studyMeta = courseProfile.loadStudyMeta(vaultPath, course.storageKey);
+  return { success: true, course, aiProfile, studyMeta };
 }
 
-function saveCourseSettings(store, { courseId, name, aiProfile }) {
+function saveCourseSettings(store, { courseId, name, aiProfile, studyMeta }) {
   const course = getCourseById(store, courseId);
   if (!course) return { success: false, error: 'Course not found' };
 
@@ -176,12 +177,16 @@ function saveCourseSettings(store, { courseId, name, aiProfile }) {
     store.set('courses', courses);
   }
 
-  const savedProfile = courseProfile.saveProfile(vaultPath, course.storageKey, aiProfile || {});
+  const saved = courseProfile.saveCourseSettingsBundle(vaultPath, course.storageKey, {
+    aiProfile: aiProfile || undefined,
+    studyMeta: studyMeta != null ? studyMeta : undefined
+  });
   const order = getCourseOrder(store);
   return {
     success: true,
     course,
-    aiProfile: savedProfile,
+    aiProfile: saved.aiProfile,
+    studyMeta: saved.studyMeta,
     courses: sortCoursesByOrder(getCourses(store), order)
   };
 }

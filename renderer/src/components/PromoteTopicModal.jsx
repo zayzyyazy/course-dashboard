@@ -1,4 +1,5 @@
 import React from 'react';
+import TitleWithMath from './TitleWithMath';
 
 export default function PromoteTopicModal({ topic, lecture, onConfirm, onCancel }) {
   if (!topic) return null;
@@ -8,7 +9,10 @@ export default function PromoteTopicModal({ topic, lecture, onConfirm, onCancel 
       <div className="bg-bg-secondary border border-border-DEFAULT rounded-xl w-full max-w-md p-6 shadow-xl">
         <h2 className="text-lg font-semibold text-text-primary mb-2">Promote to study unit?</h2>
         <p className="text-sm text-text-secondary mb-4 leading-relaxed">
-          <strong className="text-text-primary">{topic.title}</strong> will become its own study unit in
+          <strong className="text-text-primary">
+            <TitleWithMath text={topic.title} />
+          </strong>{' '}
+          will become its own study unit in
           this course — with a finer topic breakdown and tutor cards. The original lecture stays
           unchanged; this topic will be linked to the new unit.
         </p>

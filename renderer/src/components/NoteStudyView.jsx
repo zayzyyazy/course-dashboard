@@ -1,7 +1,21 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import MarkdownView from './MarkdownView';
 import NoteChatPanel from './NoteChatPanel';
 import { coursePayload } from '../utils/courseApi';
+import PinButton from './PinButton';
+import HighlightPreviewText from './HighlightPreviewText';
+
+function formatAdditionDate(iso) {
+  try {
+    return new Date(iso).toLocaleDateString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric'
+    });
+  } catch {
+    return '';
+  }
+}
 
 export default function NoteStudyView({
   note,
@@ -9,11 +23,59 @@ export default function NoteStudyView({
   lecture,
   hasApiKey,
   onClose,
-  onOpenTopic
+  onOpenTopic,
+  onNoteUpdated,
+  onOpenSiblingNote,
+  onTogglePin
 }) {
-  if (!note) return null;
+  const [activeNote, setActiveNote] = useState(note);
+  const [removingId, setRemovingId] = useState(null);
 
-  const body = note.refinedNote || note.note;
+  useEffect(() => {
+    setActiveNote(note);
+  }, [note?.id, note?.updatedAt, note?.refinedNote]);
+
+  if (!activeNote) return null;
+
+  const body = activeNote.refinedNote || activeNote.note;
+  const additions = activeNote.studyAdditions || [];
+
+  async function handleAddToNote({ excerpt, isSelection }) {
+    return window.api.appendToNoteFromStudy({
+      lecturePath: lecture.path,
+      ...coursePayload(course),
+      noteId: activeNote.id,
+      note: activeNote,
+      excerpt,
+      isSelection: Boolean(isSelection)
+    });
+  }
+
+  async function handleSaveToNotes(payload) {
+    const result = await handleAddToNote(payload);
+    if (result?.success && result.note) {
+      setActiveNote(result.note);
+      onNoteUpdated?.(result.note);
+    }
+    return result;
+  }
+
+  async function handleRemoveAddition(additionId) {
+    setRemovingId(additionId);
+    try {
+      const result = await window.api.deleteNoteStudyBlock({
+        lecturePath: lecture.path,
+        noteId: activeNote.id,
+        additionId
+      });
+      if (result?.success && result.note) {
+        setActiveNote(result.note);
+        onNoteUpdated?.(result.note);
+      }
+    } finally {
+      setRemovingId(null);
+    }
+  }
 
   return (
     <div className="fixed inset-0 z-[80] bg-bg-primary flex flex-col no-drag">
@@ -21,16 +83,28 @@ export default function NoteStudyView({
       <header className="flex items-center justify-between gap-4 px-6 py-3 border-b border-border-DEFAULT flex-shrink-0">
         <div className="min-w-0">
           <p className="text-xs text-text-muted uppercase tracking-wide">Note study</p>
-          <h1 className="text-lg font-semibold text-text-primary truncate">{note.topicTitle}</h1>
+          <h1 className="text-lg font-semibold text-text-primary truncate">{activeNote.topicTitle}</h1>
           <p className="text-xs text-text-muted truncate">
             {course?.name} · {lecture?.title}
           </p>
         </div>
         <div className="flex gap-2 flex-shrink-0">
-          {note.topicId && (
+          <PinButton
+            pinned={Boolean(activeNote.pinned)}
+            onClick={() => onTogglePin?.()}
+            title={activeNote.pinned ? 'Unpin note' : 'Pin note'}
+          />
+          {activeNote.topicId && (
             <button
               type="button"
-              onClick={() => onOpenTopic?.(note.topicId)}
+              onClick={() =>
+                onOpenTopic?.(
+                  activeNote.topicId,
+                  activeNote.materialMode,
+                  activeNote.subtopicId,
+                  activeNote.exerciseId
+                )
+              }
               className="px-3 py-1.5 rounded-lg border border-border-DEFAULT text-xs text-text-secondary hover:text-accent"
             >
               Open topic
@@ -48,13 +122,13 @@ export default function NoteStudyView({
 
       <div className="flex-1 min-h-0 grid lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-border-DEFAULT">
         <div className="overflow-y-auto p-6">
-          <blockquote className="text-sm text-text-secondary border-l-2 border-accent/50 pl-3 italic mb-4 leading-relaxed">
-            {note.highlightedText}
+          <blockquote className="text-sm text-text-secondary border-l-2 border-accent/50 pl-3 mb-4 max-h-40 overflow-y-auto">
+            <HighlightPreviewText text={activeNote.highlightedText} />
           </blockquote>
 
-          {note.keyIdeas?.length > 0 && (
+          {activeNote.keyIdeas?.length > 0 && (
             <div className="flex flex-wrap gap-1.5 mb-4">
-              {note.keyIdeas.map((idea, i) => (
+              {activeNote.keyIdeas.map((idea, i) => (
                 <span
                   key={i}
                   className="text-xs px-2 py-0.5 rounded-full bg-accent/15 text-accent border border-accent/25"
@@ -67,18 +141,47 @@ export default function NoteStudyView({
 
           {body ? (
             <div className="rounded-xl border border-border-DEFAULT bg-bg-secondary p-5 prose-note">
-              <MarkdownView>{body}</MarkdownView>
+              <MarkdownView className="markdown-body-note-study">{body}</MarkdownView>
             </div>
           ) : (
             <p className="text-sm text-text-muted">No note body — ask AI about the highlight.</p>
           )}
 
-          {note.note && note.refinedNote && note.note !== note.refinedNote && (
+          {additions.length > 0 && (
+            <div className="mt-5 rounded-lg border border-border-subtle bg-bg-secondary/50 p-3">
+              <p className="text-xs font-medium text-text-muted uppercase tracking-wide mb-2">
+                Sections added from AI
+              </p>
+              <ul className="space-y-2">
+                {additions.map((add) => (
+                  <li
+                    key={add.id}
+                    className="flex items-start justify-between gap-2 text-xs border-b border-border-subtle/60 last:border-0 pb-2 last:pb-0"
+                  >
+                    <div className="min-w-0">
+                      <p className="font-medium text-text-secondary">{add.label}</p>
+                      <p className="text-text-muted">{formatAdditionDate(add.addedAt)}</p>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={removingId === add.id}
+                      onClick={() => handleRemoveAddition(add.id)}
+                      className="text-text-muted hover:text-red-400 flex-shrink-0 disabled:opacity-40"
+                    >
+                      {removingId === add.id ? 'Removing…' : 'Remove'}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {activeNote.note && activeNote.refinedNote && activeNote.note !== activeNote.refinedNote && (
             <div className="mt-6">
               <p className="text-xs font-medium text-text-muted uppercase tracking-wide mb-2">
                 Original draft
               </p>
-              <p className="text-sm text-text-muted whitespace-pre-wrap">{note.note}</p>
+              <p className="text-sm text-text-muted whitespace-pre-wrap">{activeNote.note}</p>
             </div>
           )}
         </div>
@@ -92,12 +195,14 @@ export default function NoteStudyView({
             <NoteChatPanel
               disabled={!lecture?.path}
               placeholder="e.g. explain this formula, what am I missing…"
+              onSaveToNotes={handleSaveToNotes}
+              onOpenSavedNote={onOpenSiblingNote}
               onAsk={(question, history) =>
                 window.api.askAboutNote({
                   lecturePath: lecture.path,
                   ...coursePayload(course),
-                  noteId: note.id,
-                  note,
+                  noteId: activeNote.id,
+                  note: activeNote,
                   question,
                   history
                 })
