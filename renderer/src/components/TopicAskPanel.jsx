@@ -164,7 +164,7 @@ export default function TopicAskPanel({
             className="note-chat-md user-select-text"
             onMouseUp={handleAnswerMouseUp}
           >
-            <MarkdownView className="markdown-body-chat">{answer}</MarkdownView>
+            <MarkdownView className="markdown-body-study-chat">{answer}</MarkdownView>
           </div>
           <div className="flex flex-wrap gap-2 mt-2">
             <button

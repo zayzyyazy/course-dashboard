@@ -1,5 +1,5 @@
 import React from 'react';
-import MarkdownView from './MarkdownView';
+import ReadableStudyContent from './ReadableStudyContent';
 import HighlightPreviewText from './HighlightPreviewText';
 
 export default function NoteDetailModal({ note, onClose, onOpenTopic }) {
@@ -33,7 +33,7 @@ export default function NoteDetailModal({ note, onClose, onOpenTopic }) {
             <p className="text-xs font-medium text-text-muted uppercase tracking-wide mb-2">
               Highlighted from topic card
             </p>
-            <blockquote className="text-sm text-text-secondary border-l-2 border-accent/50 pl-3">
+            <blockquote className="study-reading-caption border-l-2 border-accent/50 pl-4">
               <HighlightPreviewText text={note.highlightedText} />
             </blockquote>
           </div>
@@ -61,8 +61,8 @@ export default function NoteDetailModal({ note, onClose, onOpenTopic }) {
               <p className="text-xs font-medium text-text-muted uppercase tracking-wide mb-2">
                 {note.refinedNote ? 'Study note (refined)' : 'Your note'}
               </p>
-              <div className="rounded-lg border border-border-DEFAULT bg-bg-tertiary/50 p-4">
-                <MarkdownView>{body}</MarkdownView>
+              <div className="rounded-lg border border-border-DEFAULT bg-bg-tertiary/50 p-5">
+                <ReadableStudyContent>{body}</ReadableStudyContent>
               </div>
             </div>
           )}

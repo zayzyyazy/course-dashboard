@@ -134,6 +134,37 @@ function buildPromptBlock(profile, courseDisplayName) {
   return lines.filter(Boolean).join('\n');
 }
 
+/** Softer profile for “Go deeper” — clarity over verbosity. */
+function buildExpandProfileBlock(profile, courseDisplayName, feedback = {}) {
+  const p = { ...DEFAULT_PROFILE, ...profile };
+  const presets = Array.isArray(feedback?.presets) ? feedback.presets : [];
+  const wantMoreDepth = presets.includes('too_shallow') || presets.includes('too_short');
+
+  const lines = [
+    '--- EXPAND STYLE (clarify the card; do not invent lecture facts) ---',
+    `Course: ${courseDisplayName || 'this course'}`,
+    p.strugglesWith?.trim() ? `Student struggles with: ${p.strugglesWith.trim()}` : '',
+    `Exam / assessment style: ${p.examStyle}`,
+    p.emphasizeAufgaben
+      ? 'When the source shows exercises or software steps, keep the practical workflow visible.'
+      : '',
+    wantMoreDepth && p.stepByStep
+      ? 'Prefer clear step-by-step logic for procedures when the source supports it.'
+      : '',
+    wantMoreDepth && p.decodeFormulas
+      ? 'When the source uses a formula, briefly name symbols — do not add extra formulas.'
+      : '',
+    wantMoreDepth && p.explainNotationCarefully
+      ? 'Decode unfamiliar notation only when it appears in the source.'
+      : '',
+    p.extraInstructions?.trim() ? `Additional course instructions: ${p.extraInstructions.trim()}` : '',
+    'Prefer clarity over completeness; never increase perceived difficulty.',
+    'One level clearer than the topic card — not a textbook chapter.',
+    '---'
+  ];
+  return lines.filter(Boolean).join('\n');
+}
+
 module.exports = {
   SETTINGS_FILE,
   DEFAULT_PROFILE,
@@ -145,5 +176,6 @@ module.exports = {
   saveStudyMeta,
   saveCourseSettingsBundle,
   normalizeStudyMeta,
-  buildPromptBlock
+  buildPromptBlock,
+  buildExpandProfileBlock
 };

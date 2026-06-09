@@ -47,6 +47,20 @@ html, body, #root {
   color: #e2e8f0;
 }
 
+.highlightable-markdown mark.cd-saved-highlight {
+  background: rgba(250, 204, 21, 0.35);
+  color: #fef9c3;
+  border-radius: 2px;
+  padding: 0 0.1em;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  cursor: pointer;
+}
+
+.highlightable-markdown mark.cd-saved-highlight:hover {
+  background: rgba(250, 204, 21, 0.5);
+}
+
 /* Prose / markdown styles */
 .markdown-body h1 { font-size: 1.5rem; font-weight: 700; margin: 1.25rem 0 0.75rem; color: #e2e8f0; }
 .markdown-body h2 { font-size: 1.25rem; font-weight: 600; margin: 1rem 0 0.5rem; color: #e2e8f0; }
@@ -87,6 +101,125 @@ html, body, #root {
 .markdown-body-reading li { font-size: 1.0625rem; line-height: 1.75; }
 .markdown-body-reading .katex { font-size: 1.08em; color: #e8edf5; }
 .markdown-body-reading .katex-display { margin: 1rem 0; }
+
+/* Study panels — notes, references, saved content (left pane in study views) */
+.study-reading-panel {
+  max-width: 42rem;
+}
+
+.study-shell .study-reading-panel .markdown-body-study p,
+.study-shell .study-reading-panel .markdown-body-study li,
+.study-reading-panel .markdown-body-study p,
+.study-reading-panel .markdown-body-study li {
+  font-size: 1.125rem;
+  line-height: 1.8;
+  color: #cbd5e1;
+}
+
+.markdown-body-study h1 {
+  font-size: 1.65rem;
+  margin-top: 0;
+  line-height: 1.35;
+  color: #f1f5f9;
+}
+
+.markdown-body-study h2 {
+  font-size: 1.35rem;
+  margin-top: 1.5rem;
+  color: #f1f5f9;
+}
+
+.markdown-body-study h3 {
+  font-size: 1.15rem;
+  margin-top: 1.25rem;
+  color: #e2e8f0;
+}
+
+.markdown-body-study p,
+.markdown-body-study li {
+  font-size: 1.125rem;
+  line-height: 1.8;
+  color: #cbd5e1;
+}
+
+.markdown-body-study p {
+  margin: 0.85rem 0;
+}
+
+.markdown-body-study ul,
+.markdown-body-study ol {
+  margin: 0.75rem 0 1rem;
+  padding-left: 1.5rem;
+}
+
+.markdown-body-study li {
+  margin: 0.4rem 0;
+}
+
+.markdown-body-study strong {
+  color: #f8fafc;
+}
+
+.markdown-body-study blockquote {
+  color: #94a3b8;
+  margin: 1rem 0;
+}
+
+.markdown-body-study .katex {
+  font-size: 1.1em;
+}
+
+.study-reading-caption {
+  font-size: 1rem;
+  line-height: 1.65;
+  color: #94a3b8;
+}
+
+/* Study AI chat — larger than sidebar chat, still compact vs main content */
+.markdown-body-study-chat {
+  font-size: 1rem;
+}
+
+.markdown-body-study-chat h1,
+.markdown-body-study-chat h2,
+.markdown-body-study-chat h3 {
+  font-size: 1.1rem;
+  margin: 0.65rem 0 0.4rem;
+  color: #e2e8f0;
+}
+
+.markdown-body-study-chat p,
+.markdown-body-study-chat li {
+  font-size: 1rem;
+  line-height: 1.75;
+  color: #cbd5e1;
+  margin: 0.5rem 0;
+}
+
+.markdown-body-study-chat ul,
+.markdown-body-study-chat ol {
+  padding-left: 1.35rem;
+  margin: 0.5rem 0;
+}
+
+.markdown-body-study-chat strong {
+  color: #f1f5f9;
+}
+
+.markdown-body-study-chat .katex {
+  font-size: 1.05em;
+  color: #e8edf5;
+}
+
+.markdown-body-study-chat .katex-display {
+  margin: 0.65rem 0;
+  overflow-x: auto;
+}
+
+.note-chat-user-bubble {
+  font-size: 1rem;
+  line-height: 1.65;
+}
 
 /* Pin-to-screen floating cards — type scales with card size (font-size on .study-pin-card-content) */
 .study-pin-card-content .study-pin-markdown.markdown-body-reading p,
@@ -147,6 +280,87 @@ html, body, #root {
 .animate-slide-in { animation: slideIn 0.2s ease forwards; }
 .animate-spin { animation: spin 1s linear infinite; }
 .animate-pulse-slow { animation: pulse 2s ease infinite; }
+
+/* Half-screen / compact study layout */
+.study-shell--compact .study-inner {
+  max-width: 100%;
+}
+
+@media (max-width: 879px) {
+  .study-shell .study-inner {
+    max-width: 100%;
+  }
+}
+
+.study-shell--compact .study-title {
+  font-size: 1.2rem;
+  line-height: 1.35;
+}
+
+@media (max-width: 879px) {
+  .study-shell .study-title {
+    font-size: 1.2rem;
+    line-height: 1.35;
+  }
+}
+
+.study-shell--compact .study-section-title {
+  font-size: 0.7rem;
+  margin-bottom: 0.5rem;
+}
+
+@media (max-width: 879px) {
+  .study-shell .study-section-title {
+    font-size: 0.7rem;
+    margin-bottom: 0.5rem;
+  }
+}
+
+.study-shell--compact .study-card {
+  padding: 0.875rem;
+}
+
+@media (max-width: 879px) {
+  .study-shell .study-card {
+    padding: 0.875rem;
+  }
+}
+
+.study-shell--compact .markdown-body-reading h1 {
+  font-size: 1.35rem;
+}
+
+@media (max-width: 879px) {
+  .study-shell .markdown-body-reading h1 {
+    font-size: 1.35rem;
+  }
+}
+
+.study-shell--compact .markdown-body-reading h2 {
+  font-size: 1.15rem;
+  margin-top: 1.25rem;
+}
+
+@media (max-width: 879px) {
+  .study-shell .markdown-body-reading h2 {
+    font-size: 1.15rem;
+    margin-top: 1.25rem;
+  }
+}
+
+.study-shell--compact .markdown-body-reading p,
+.study-shell--compact .markdown-body-reading li {
+  font-size: 0.9375rem;
+  line-height: 1.65;
+}
+
+@media (max-width: 879px) {
+  .study-shell .markdown-body-reading p,
+  .study-shell .markdown-body-reading li {
+    font-size: 0.9375rem;
+    line-height: 1.65;
+  }
+}
 
 /* Drop zone */
 .drop-zone-active {

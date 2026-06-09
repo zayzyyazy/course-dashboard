@@ -3,7 +3,7 @@ const { parseJsonPayload } = require('./lectureStructureLlm');
 const { MATH_OUTPUT_HINT } = require('./courseProfile');
 
 function buildTopicCardsPrompt(language, domainHint, courseProfileBlock = '') {
-  return `You are an expert university tutor writing study cards for ONE lecture's topics. Output STRICT JSON ONLY.
+  return `You are an expert university tutor writing study cards for ONE lecture topic. Output STRICT JSON ONLY.
 
 LANGUAGE: ${language}
 DOMAIN CONTEXT: ${domainHint || 'general academic lecture'}
@@ -33,52 +33,183 @@ WHEN THE TOPIC IS QUANTITATIVE OR PROCEDURAL, INCLUDE WHAT STUDENTS MUST LEARN:
 - Programming / CS: concept vs syntax, algorithm/data-flow steps, when to use, minimal code only if lecture had code.
 - Technical methods: step-by-step procedure, inputs/outputs, how to apply, not just what it is called.
 
-WHEN INTUITION OR COMPARISON MATTERS: explain intuition; contrast similar methods (e.g. t-test vs ANOVA) when the lecture does.
+WHEN INTUITION OR COMPARISON MATTERS: explain intuition; contrast similar methods when the lecture does.
 
-REJECT: generic filler, meta labels, content not in the lecture, empty templates, ignoring formulas that are central to the topic.
+REJECT: generic filler, meta labels, content not in the lecture, empty templates.
 
-Length: simpler topics ~150-280 words; formula-heavy or procedural topics up to ~500 words.
-Be concrete, lecture-faithful. One card per topic; topicTitle must match exactly.`;
+Length: ~120-280 words for this single topic card.
+Escape double quotes inside markdown as \\". No raw newlines inside JSON strings — use \\n.
+topicTitle must match the requested topic exactly.`;
 }
 
-function buildTopicCardsUserPayload({ extracted, lectureTitle, lectureSummary, topics, courseThread }) {
-  const topicList = topics
-    .map(
-      (t, i) =>
-        `${i + 1}. ${t.title} (importance: ${t.importance})${
-          t.subtopics?.length ? `\n   Subtopics: ${t.subtopics.map((s) => s.title).join('; ')}` : ''
-        }`
-    )
-    .join('\n');
+function buildSingleTopicUserPayload({ extracted, lectureTitle, lectureSummary, topic, courseThread }) {
+  const subtopicLine = topic.subtopics?.length
+    ? `Subtopics: ${topic.subtopics.map((s) => s.title).join('; ')}`
+    : '';
 
   return [
     `Lecture: ${lectureTitle}`,
     `Summary: ${lectureSummary}`,
     courseThread?.summary ? `Course position: ${courseThread.summary}` : '',
     '',
-    'Topics to explain (generate one card each):',
-    topicList,
+    `Generate ONE study card for this topic only: "${topic.title}" (importance: ${topic.importance})`,
+    subtopicLine,
+    `Return JSON with a single-item "cards" array. topicTitle must be exactly: "${topic.title}"`,
     '',
     '--- Lecture source excerpt ---',
-    extracted.slice(0, 45000)
-  ].join('\n');
+    extracted.slice(0, 10000)
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+/** Pull markdown from complete or truncated topic-card JSON when JSON.parse fails. */
+function salvageTopicCardMarkdown(raw) {
+  if (!raw) return null;
+  const marker = '"markdown"';
+  const idx = raw.indexOf(marker);
+  if (idx < 0) return null;
+
+  let i = raw.indexOf(':', idx + marker.length);
+  if (i < 0) return null;
+  i += 1;
+  while (i < raw.length && /\s/.test(raw[i])) i += 1;
+  if (raw[i] !== '"') return null;
+  i += 1;
+
+  let out = '';
+  let escaped = false;
+  while (i < raw.length) {
+    const c = raw[i];
+    if (escaped) {
+      if (c === 'n') out += '\n';
+      else if (c === 't') out += '\t';
+      else if (c === 'r') out += '\r';
+      else if (c === 'u' && raw.slice(i, i + 4).match(/^u[0-9a-fA-F]{4}/)) {
+        out += String.fromCharCode(parseInt(raw.slice(i + 1, i + 5), 16));
+        i += 4;
+      } else out += c;
+      escaped = false;
+    } else if (c === '\\') {
+      escaped = true;
+    } else if (c === '"') {
+      break;
+    } else {
+      out += c;
+    }
+    i += 1;
+  }
+
+  const markdown = out.trim();
+  return markdown.length >= 60 ? markdown : null;
+}
+
+function resolveTopicForCard(cardTitle, topics, usedIds) {
+  const normalized = topicExtraction.normalizeTopicLabel(cardTitle);
+  if (!normalized) return null;
+  const lower = normalized.toLowerCase();
+
+  const exact = topics.find(
+    (t) =>
+      !usedIds.has(t.id) &&
+      topicExtraction.normalizeTopicLabel(t.title).toLowerCase() === lower
+  );
+  if (exact) return exact;
+
+  const fuzzy = topics.find(
+    (t) => !usedIds.has(t.id) && topicExtraction.areNearDuplicate(t.title, normalized)
+  );
+  if (fuzzy) return fuzzy;
+
+  return (
+    topics.find((t) => {
+      if (usedIds.has(t.id)) return false;
+      const tl = topicExtraction.normalizeTopicLabel(t.title).toLowerCase();
+      return tl.length > 4 && lower.length > 4 && (tl.includes(lower) || lower.includes(tl));
+    }) || null
+  );
 }
 
 function validateCards(raw, topics) {
   if (!raw || !Array.isArray(raw.cards)) return null;
-  const byTitle = new Map(topics.map((t) => [t.title.toLowerCase(), t]));
+  const usedIds = new Set();
   const out = [];
+  const unmatched = [];
+
   for (const card of raw.cards) {
     const title = topicExtraction.normalizeTopicLabel(card.topicTitle);
-    const topic = byTitle.get(title.toLowerCase());
-    if (!topic) continue;
+    const topic = resolveTopicForCard(card.topicTitle, topics, usedIds);
+    if (!topic) {
+      if (title) unmatched.push(title);
+      continue;
+    }
     const markdown = String(card.markdown || '').trim();
-    if (markdown.length < 80) continue;
+    if (markdown.length < 60) {
+      unmatched.push(`${title} (too short: ${markdown.length})`);
+      continue;
+    }
+    usedIds.add(topic.id);
     out.push({ topicId: topic.id, markdown: markdown.slice(0, 12000) });
   }
-  if (out.length < Math.min(2, topics.length)) return null;
+
+  const required = topics.length <= 1 ? 1 : Math.min(2, topics.length);
+  if (out.length < required) return null;
   return out;
 }
+
+async function generateOneTopicCard({ topic, extracted, lecture, outputLanguage, domainHint, courseProfileBlock, callLlm }) {
+  const system = buildTopicCardsPrompt(outputLanguage, domainHint, courseProfileBlock);
+  const user = buildSingleTopicUserPayload({
+    extracted,
+    lectureTitle: lecture.lectureTitle || lecture.title,
+    lectureSummary: lecture.lectureSummary || lecture.summary,
+    topic,
+    courseThread: lecture.courseThread
+  });
+
+  let raw = await callLlm(system, user, { maxTokens: 2048 });
+  let parsed = parseJsonPayload(raw);
+  let cards = validateCards(parsed, [topic]);
+
+  if (!cards) {
+    const salvaged = salvageTopicCardMarkdown(raw);
+    if (salvaged) {
+      cards = [{ topicId: topic.id, markdown: salvaged.slice(0, 12000) }];
+    }
+  }
+
+  if (!cards && parsed?.cards?.[0]?.markdown) {
+    const md = String(parsed.cards[0].markdown).trim();
+    if (md.length >= 60) {
+      cards = [{ topicId: topic.id, markdown: md.slice(0, 12000) }];
+    }
+  }
+
+  if (!cards) {
+    raw = await callLlm(
+      system,
+      `${user}\n\nPrevious JSON invalid or truncated. Return ONLY valid JSON: {"cards":[{"topicTitle":"${topic.title}","markdown":"..."}]} — compact markdown, 80-200 words, properly escaped.`,
+      { maxTokens: 2048 }
+    );
+    parsed = parseJsonPayload(raw);
+    cards = validateCards(parsed, [topic]);
+    if (!cards && parsed?.cards?.[0]?.markdown?.trim().length >= 60) {
+      cards = [{ topicId: topic.id, markdown: String(parsed.cards[0].markdown).trim().slice(0, 12000) }];
+    }
+    if (!cards) {
+      const salvaged = salvageTopicCardMarkdown(raw);
+      if (salvaged) {
+        cards = [{ topicId: topic.id, markdown: salvaged.slice(0, 12000) }];
+      }
+    }
+  }
+
+  if (!cards) return null;
+
+  return cards[0];
+}
+
+const TOPIC_CARD_CONCURRENCY = 3;
 
 async function generateTopicCards({
   extracted,
@@ -86,31 +217,47 @@ async function generateTopicCards({
   outputLanguage,
   domainHint,
   courseProfileBlock,
-  callLlm
+  callLlm,
+  onProgress
 }) {
-  const system = buildTopicCardsPrompt(outputLanguage, domainHint, courseProfileBlock);
-  const user = buildTopicCardsUserPayload({
-    extracted,
-    lectureTitle: lecture.lectureTitle || lecture.title,
-    lectureSummary: lecture.lectureSummary || lecture.summary,
-    topics: lecture.topics,
-    courseThread: lecture.courseThread
-  });
+  const topics = lecture.topics || [];
+  if (!topics.length) return { ok: false, error: 'No topics to generate cards for' };
 
-  let raw = await callLlm(system, user);
-  let parsed = parseJsonPayload(raw);
-  let cards = validateCards(parsed, lecture.topics);
+  const cards = new Array(topics.length);
+  let nextIndex = 0;
+  let failure = null;
 
-  if (!cards) {
-    raw = await callLlm(
-      system,
-      `${user}\n\nPrevious response invalid. Return JSON with a "cards" array — one entry per topic, matching topic titles exactly.`
-    );
-    parsed = parseJsonPayload(raw);
-    cards = validateCards(parsed, lecture.topics);
-  }
+  const worker = async () => {
+    while (!failure) {
+      const i = nextIndex;
+      nextIndex += 1;
+      if (i >= topics.length) return;
 
-  if (!cards) return { ok: false, error: 'Topic card generation failed validation' };
+      const topic = topics[i];
+      onProgress?.(`Writing topic card ${i + 1}/${topics.length}: ${topic.title}…`);
+
+      const card = await generateOneTopicCard({
+        topic,
+        extracted,
+        lecture,
+        outputLanguage,
+        domainHint,
+        courseProfileBlock,
+        callLlm
+      });
+      if (!card) {
+        failure = `Topic card generation failed for "${topic.title}"`;
+        return;
+      }
+      cards[i] = card;
+    }
+  };
+
+  const poolSize = Math.min(TOPIC_CARD_CONCURRENCY, topics.length);
+  await Promise.all(Array.from({ length: poolSize }, () => worker()));
+
+  if (failure) return { ok: false, error: failure };
+
   return { ok: true, cards };
 }
 
@@ -131,5 +278,9 @@ function applyCardsToLecture(lecture, cards) {
 module.exports = {
   buildTopicCardsPrompt,
   generateTopicCards,
-  applyCardsToLecture
+  generateOneTopicCard,
+  applyCardsToLecture,
+  validateCards,
+  resolveTopicForCard,
+  salvageTopicCardMarkdown
 };

@@ -102,7 +102,7 @@ export default function AskPanel({ chatKey, onAsk, onOpenSavedNote, disabled, pl
 
       {answer && (
         <div className="mt-3 border-t border-border-subtle pt-3">
-          <MarkdownView className="markdown-body-chat text-sm">{answer}</MarkdownView>
+          <MarkdownView className="markdown-body-study-chat">{answer}</MarkdownView>
         </div>
       )}
     </div>

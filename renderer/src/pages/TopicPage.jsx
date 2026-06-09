@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import HighlightableMarkdown from '../components/HighlightableMarkdown';
 import SaveHighlightNoteModal from '../components/SaveHighlightNoteModal';
 import PromoteTopicModal from '../components/PromoteTopicModal';
@@ -11,10 +11,15 @@ import { StudyDepthBadge } from '../components/StudyDepthBadge';
 import TitleWithMath from '../components/TitleWithMath';
 import { hasSubtopics, isTopicStudied } from '../utils/studyState';
 import { subtopicAnchor } from '@shared/noteAnchor.cjs';
+import { notesForLinkPicker } from '@shared/noteCardMarkers.cjs';
 import TopicStatusBadge from '../components/TopicStatusBadge';
 import { askChatKey } from '../utils/askChatStore';
 import PinButton from '../components/PinButton';
 import RegenerateFeedbackBar from '../components/RegenerateFeedbackBar';
+import DeepPdfFigures from '../components/DeepPdfFigures';
+import StudyPageShell from '../components/StudyPageShell';
+import { useCompactLayout } from '../hooks/useCompactLayout';
+import { courseHasPracticeCoach, openPracticeCoach, resolveEpcVaultKey } from '../utils/openPracticeCoach';
 
 export default function TopicPage({
   course,
@@ -47,6 +52,8 @@ export default function TopicPage({
   }, [topic?.id, topic?.card?.deepMarkdown]);
   const [pendingHighlight, setPendingHighlight] = useState(null);
   const [showPromoteModal, setShowPromoteModal] = useState(false);
+  const [lectureNotes, setLectureNotes] = useState([]);
+  const compact = useCompactLayout();
 
   const isExercise = materialMode === 'exercise';
   const activeExerciseId = resolveActiveExerciseId(lecture, exerciseId);
@@ -63,6 +70,51 @@ export default function TopicPage({
   const canPromote = isSourceLecture && !isExercise && !topic?.promotedToUnitId && hasApiKey;
   const topicHasSubtopics = hasSubtopics(topic);
   const isStudied = isTopicStudied(topic);
+  const showPracticeCoach =
+    !isExercise && courseHasPracticeCoach(course) && lecture?.id && topic?.id;
+  const epcVaultKey = resolveEpcVaultKey(course);
+
+  async function handleOpenTopicPractice(subtopicId = '') {
+    const firstSub = topic?.subtopics?.find((s) => s?.id);
+    try {
+      await openPracticeCoach(
+        {
+          courseStorageKey: course?.storageKey,
+          courseName: course?.name,
+          unitId: lecture?.id || '',
+          topicId: topic?.id || '',
+          subtopicId: subtopicId || firstSub?.id || ''
+        },
+        onNotify
+      );
+    } catch {
+      /* onNotify already shown */
+    }
+  }
+
+  async function loadLectureNotes() {
+    if (!lecture?.path) return;
+    try {
+      const res = await window.api.listLectureNotes(lecture.path);
+      if (res?.success) setLectureNotes(res.notes || []);
+    } catch {
+      setLectureNotes([]);
+    }
+  }
+
+  useEffect(() => {
+    loadLectureNotes();
+  }, [lecture?.path]);
+
+  const linkableNotesForModal = useMemo(() => {
+    if (!pendingHighlight?.subtopicId) return [];
+    return notesForLinkPicker(lectureNotes, {
+      topicId: topic.id,
+      subtopicId: pendingHighlight.subtopicId,
+      materialMode,
+      exerciseId: activeExerciseId
+    });
+  }, [lectureNotes, pendingHighlight, topic.id, materialMode, activeExerciseId]);
 
   async function handleToggleStudied() {
     const updated = await window.api.markTopicStudied({
@@ -157,13 +209,17 @@ export default function TopicPage({
         : source === 'card'
           ? 'topic-summary'
           : source || 'topic-summary';
+    const saveMode =
+      anchorMeta.saveMode ||
+      (source === 'deep' && subtopic ? 'card' : 'notes');
     setPendingHighlight({
       text,
       source,
       sourceKind,
       sectionAnchor,
       subtopicId: subtopic?.id || '',
-      subtopicTitle: subtopic?.title || ''
+      subtopicTitle: subtopic?.title || '',
+      saveMode
     });
   }
 
@@ -214,6 +270,7 @@ export default function TopicPage({
     });
     setPendingHighlight(null);
     if (result.success) {
+      await loadLectureNotes();
       onNoteSaved?.(result.note);
     } else {
       throw new Error(result.error || 'Could not save note');
@@ -222,8 +279,52 @@ export default function TopicPage({
 
   async function handleSaveNoteWithAI(result) {
     setPendingHighlight(null);
+    await loadLectureNotes();
     onNoteSaved?.(result.note);
     onNotify?.(result.message || (result.mode === 'appended' ? 'Added to existing note' : 'Note saved'));
+  }
+
+  async function handleSaveOnCard({ shortNote, relatedNoteId }) {
+    const short = String(shortNote || '').trim();
+    const result = await window.api.saveHighlightNote({
+      lecturePath: lecture.path,
+      topicId: topic.id,
+      topicTitle: topic.title,
+      subtopicId: pendingHighlight.subtopicId || '',
+      subtopicTitle: pendingHighlight.subtopicTitle || '',
+      sectionAnchor: pendingHighlight.sectionAnchor || '',
+      sourceKind: pendingHighlight.sourceKind || 'deeper-subtopic',
+      markdownSource: cardMd,
+      source: pendingHighlight.source,
+      materialMode,
+      exerciseId: isExercise ? activeExerciseId : '',
+      highlightedText: pendingHighlight.text,
+      note: short,
+      refinedNote: short || pendingHighlight.text,
+      relatedNoteId: relatedNoteId || '',
+      cardMarker: true
+    });
+    setPendingHighlight(null);
+    if (result.success) {
+      await loadLectureNotes();
+      onNoteSaved?.(result.note);
+      onNotify?.('Highlight saved on card');
+    } else {
+      throw new Error(result.error || 'Could not save highlight');
+    }
+  }
+
+  async function handleDeleteCardMarker(noteId) {
+    if (!lecture?.path || !noteId) return;
+    const res = await window.api.deleteLectureNote({
+      lecturePath: lecture.path,
+      noteId
+    });
+    if (res?.success) {
+      await loadLectureNotes();
+      onNoteSaved?.();
+      onNotify?.('Highlight removed from card');
+    }
   }
 
   async function handleConfirmPromote() {
@@ -241,10 +342,8 @@ export default function TopicPage({
   const cardMd = topic?.card?.markdown || '_No study card yet._';
 
   return (
-    <div className="h-full flex flex-col overflow-hidden no-drag">
-      <div className="h-8 drag-region flex-shrink-0" />
-      <div className="flex-1 overflow-y-auto">
-        <div className="max-w-3xl mx-auto px-8 py-6 pb-16">
+    <>
+    <StudyPageShell>
           <button type="button" onClick={onBack} className="text-xs text-text-muted hover:text-accent mb-3">
             ← <TitleWithMath text={lecture.title} />
             {isExercise ? ' · Übung' : ''}
@@ -279,7 +378,7 @@ export default function TopicPage({
 
           <div className="flex items-start justify-between gap-4 mb-4 flex-wrap">
             <div className="min-w-0">
-              <h1 className="text-2xl font-bold text-text-primary">
+              <h1 className="study-title text-2xl font-bold text-text-primary">
                 <TitleWithMath text={topic.title} />
               </h1>
               {!isExercise && (
@@ -298,9 +397,15 @@ export default function TopicPage({
                   type="button"
                   onClick={onToggleSidebar}
                   className="text-xs px-2.5 py-1.5 rounded-lg border border-border-DEFAULT text-text-muted hover:text-accent hover:border-accent/40"
-                  title={sidebarHidden ? 'Sidebar einblenden (⌘\\)' : 'Sidebar ausblenden (⌘\\)'}
+                  title={
+                    sidebarHidden
+                      ? 'Sidebar einblenden (⌘\\)'
+                      : compact
+                        ? 'Sidebar ausblenden — mehr Platz (⌘\\)'
+                        : 'Sidebar ausblenden (⌘\\)'
+                  }
                 >
-                  {sidebarHidden ? '☰ Kurse' : '◧ Vollbild'}
+                  {sidebarHidden ? '☰ Kurse' : compact ? '◧ Focus' : '◧ Vollbild'}
                 </button>
               )}
               <PinButton
@@ -330,8 +435,34 @@ export default function TopicPage({
                   {isStudied ? 'Studied ✓' : 'Mark studied'}
                 </button>
               )}
+              {showPracticeCoach && (
+                <button
+                  type="button"
+                  onClick={() => handleOpenTopicPractice()}
+                  className="text-xs px-3 py-1.5 rounded-lg border border-violet-500/50 bg-violet-500/20 text-violet-100 font-medium hover:border-violet-400 hover:bg-violet-500/30"
+                  title="Generate exercises in Exam Practice Coach"
+                >
+                  Practice exercises →
+                </button>
+              )}
             </div>
           </div>
+
+          {showPracticeCoach && topicHasSubtopics && (
+            <div className="mb-4 rounded-lg border border-violet-500/30 bg-violet-500/10 px-3 py-2.5 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs text-violet-100/90">
+                Finished studying? Open <span className="font-medium">Exercise Coach</span> for this topic — or use
+                Practice on each subtopic below.
+              </p>
+              <button
+                type="button"
+                onClick={() => handleOpenTopicPractice()}
+                className="text-xs px-3 py-1.5 rounded-md border border-violet-400/60 bg-violet-500/25 text-violet-50 font-medium hover:bg-violet-500/35 flex-shrink-0"
+              >
+                Practice this topic →
+              </button>
+            </div>
+          )}
 
           <p className="text-xs text-text-muted mb-4">
             Select text in the topic summary or a subtopic → <span className="text-accent">Save note</span>.
@@ -391,7 +522,7 @@ export default function TopicPage({
             </div>
           )}
 
-          <article className="rounded-xl border border-border-DEFAULT bg-bg-secondary p-6 mb-6">
+          <article className="study-card rounded-xl border border-border-DEFAULT bg-bg-secondary p-6 mb-6">
             <p className="text-xs font-medium text-text-muted uppercase tracking-wide mb-3">Topic summary</p>
             <HighlightableMarkdown
               markdownSource={cardMd}
@@ -440,11 +571,14 @@ export default function TopicPage({
                   if (freshTopic) onTopicUpdated?.(freshTopic);
                 }
               }}
+              lectureNotes={lectureNotes}
+              onOpenSavedNote={onOpenSavedNote}
+              onDeleteCardMarker={handleDeleteCardMarker}
             />
           ) : (
             <>
               {deepMd && (
-                <article className="rounded-xl border border-accent/30 bg-bg-secondary p-6 mb-6">
+                <article className="study-card rounded-xl border border-accent/30 bg-bg-secondary p-6 mb-6">
                   <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
                     <p className="text-xs font-medium text-accent">Deeper explanation</p>
                     <RegenerateFeedbackBar
@@ -453,6 +587,11 @@ export default function TopicPage({
                       onRegenerate={handleRegenerateTopic}
                     />
                   </div>
+                  <DeepPdfFigures
+                    lecturePath={lecture.path}
+                    figures={topic?.card?.deepFigures}
+                    className="mb-3"
+                  />
                   <HighlightableMarkdown
                     markdownSource={deepMd}
                     pinSource={{
@@ -503,8 +642,7 @@ export default function TopicPage({
               })
             }
           />
-        </div>
-      </div>
+    </StudyPageShell>
 
       {pendingHighlight && (
         <SaveHighlightNoteModal
@@ -522,6 +660,9 @@ export default function TopicPage({
           exerciseId={activeExerciseId}
           source={pendingHighlight.source}
           hasApiKey={Boolean(hasApiKey)}
+          cardContext={pendingHighlight.saveMode === 'card'}
+          linkableNotes={linkableNotesForModal}
+          onSaveOnCard={handleSaveOnCard}
           onSaveManual={handleSaveNoteManual}
           onSaveWithAI={handleSaveNoteWithAI}
           onCancel={() => setPendingHighlight(null)}
@@ -536,6 +677,6 @@ export default function TopicPage({
           onCancel={() => setShowPromoteModal(false)}
         />
       )}
-    </div>
+    </>
   );
 }

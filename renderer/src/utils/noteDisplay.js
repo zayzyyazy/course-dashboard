@@ -1,4 +1,4 @@
-import { buildNoteDisplayModel } from '@shared/noteGroups.cjs';
+import { buildNoteDisplayModel, noteContextLabel, formatNoteDate } from '@shared/noteGroups.cjs';
 import { displayNotePreview, displayNoteTitle } from './noteListDisplay';
 
-export { buildNoteDisplayModel, displayNotePreview, displayNoteTitle };
+export { buildNoteDisplayModel, noteContextLabel, formatNoteDate, displayNotePreview, displayNoteTitle };

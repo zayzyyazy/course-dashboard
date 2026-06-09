@@ -42,7 +42,7 @@ function structureToLecture(structure, meta) {
       card: null,
       studyState: 'new'
     })),
-    studyState: { opened: false, lastOpenedAt: null, topicsStudied: 0 }
+    studyState: { opened: false, lastOpenedAt: null, topicsStudied: 0, lastRewindAt: null }
   };
 }
 
@@ -92,8 +92,8 @@ async function processLecturePdf({
   const orderIndex = order.indexOf(lectureId) + 1;
 
   const { OpenAI } = require('openai');
-  const openai = new OpenAI({ apiKey });
-  const callLlm = async (system, user) => {
+  const openai = new OpenAI({ apiKey, timeout: 120_000, maxRetries: 1 });
+  const callLlm = async (system, user, options = {}) => {
     const response = await openai.chat.completions.create({
       model,
       messages: [
@@ -101,6 +101,7 @@ async function processLecturePdf({
         { role: 'user', content: user }
       ],
       temperature,
+      max_tokens: options.maxTokens ?? 4096,
       response_format: { type: 'json_object' }
     });
     return (response.choices?.[0]?.message?.content || '').trim();
@@ -117,10 +118,10 @@ async function processLecturePdf({
 
   if (!structResult.ok) {
     const err = new Error(structResult.error || 'Structure extraction failed');
+    err.code = 'STRUCTURE_FAILED';
     err.debug = structResult.debug;
     throw err;
   }
-
   let lecture = structureToLecture(structResult.structure, {
     id: lectureId,
     title,
@@ -128,18 +129,20 @@ async function processLecturePdf({
     sourcePdf: path.basename(pdfPath)
   });
 
-  send('Writing tutor topic cards…');
+  send('Writing tutor topic cards (1/?)…');
   const cardsResult = await topicCardsLlm.generateTopicCards({
     extracted: extractedText,
     lecture,
     outputLanguage: language,
     domainHint,
     courseProfileBlock,
-    callLlm
+    callLlm,
+    onProgress: (message) => send(message)
   });
 
   if (!cardsResult.ok) {
     const err = new Error(cardsResult.error || 'Topic cards failed');
+    err.code = 'TOPIC_CARDS_FAILED';
     throw err;
   }
 
@@ -206,7 +209,7 @@ function structureToExerciseLayer(structure, meta) {
       studyState: 'new'
     })),
     lectureLinks: [],
-    studyState: { opened: false, lastOpenedAt: null, topicsStudied: 0 }
+    studyState: { opened: false, lastOpenedAt: null, topicsStudied: 0, lastRewindAt: null }
   };
 }
 
@@ -251,7 +254,7 @@ async function processExercisePdf({
 
   const { OpenAI } = require('openai');
   const openai = new OpenAI({ apiKey });
-  const callLlm = async (system, user) => {
+  const callLlm = async (system, user, options = {}) => {
     const response = await openai.chat.completions.create({
       model,
       messages: [
@@ -259,6 +262,7 @@ async function processExercisePdf({
         { role: 'user', content: user }
       ],
       temperature,
+      max_tokens: options.maxTokens ?? 4096,
       response_format: { type: 'json_object' }
     });
     return (response.choices?.[0]?.message?.content || '').trim();

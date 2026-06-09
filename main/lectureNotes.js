@@ -10,8 +10,7 @@ const {
   buildNoteTitle,
   buildNotePreview,
   enrichNoteListFields,
-  stringsForLocale,
-  isWeakTitle
+  stringsForLocale
 } = require('../shared/noteListMeta.cjs');
 const { detectNoteLocale } = require('../shared/noteLanguage.cjs');
 const { buildNoteRoutingKey } = require('../shared/noteAnchor.cjs');
@@ -60,14 +59,7 @@ function hydrateNoteForDisplay(note) {
       hydrated.note,
       hydrated.title
     ) || 'de';
-  const needsFill =
-    !hydrated.title?.trim() ||
-    isWeakTitle(hydrated.title, hydrated.topicTitle) ||
-    !hydrated.preview?.trim();
-  if (needsFill) {
-    return enrichNoteListFields(hydrated, { locale });
-  }
-  return { ...hydrated, outputLocale: locale };
+  return enrichNoteListFields(hydrated, { locale });
 }
 
 function listNotes(lecturePath) {
@@ -102,14 +94,18 @@ function addNote(lecturePath, entry) {
   }
 
   const body = String(entry.note || entry.refinedNote || '').trim();
+  const cardMarker = Boolean(entry.cardMarker);
   if (!highlightedText) {
     return { success: false, error: 'Highlighted text is empty' };
   }
-  if (!body && source !== 'noteChat' && source !== 'tutorChat') {
+  if (!body && source !== 'noteChat' && source !== 'tutorChat' && !cardMarker) {
     return { success: false, error: 'Note body is empty' };
   }
 
-  const refinedRaw = String(entry.refinedNote || entry.note || '').trim();
+  let refinedRaw = String(entry.refinedNote || entry.note || '').trim();
+  if (cardMarker && !refinedRaw) {
+    refinedRaw = highlightedText;
+  }
   const keyIdeas = Array.isArray(entry.keyIdeas)
     ? entry.keyIdeas.map((k) => String(k).trim()).filter(Boolean).slice(0, 8)
     : [];
@@ -165,7 +161,9 @@ function addNote(lecturePath, entry) {
     refinedNote: normalizeNoteMarkdown(refinedRaw).slice(0, 12000),
     refinedNoteCore: normalizeNoteMarkdown(refinedRaw).slice(0, 12000),
     studyAdditions: [],
+    inlineHighlights: [],
     relatedNoteId: String(entry.relatedNoteId || '').trim(),
+    cardMarker,
     materialMode: ['lecture', 'exercise'].includes(entry.materialMode) ? entry.materialMode : 'lecture',
     exerciseId:
       entry.materialMode === 'exercise' ? String(entry.exerciseId || '').trim() : '',
@@ -249,17 +247,22 @@ function mergeNotes(lecturePath, { sourceNoteId, targetNoteId } = {}) {
   const tNote = fresh.notes[tIdx];
   const sNote = fresh.notes[sIdx];
 
-  if (isWeakTitle(tNote.title, tNote.topicTitle) && !isWeakTitle(sNote.title, tNote.topicTitle)) {
-    tNote.title = sNote.title;
-  }
   tNote.keyIdeas = [...new Set([...(tNote.keyIdeas || []), ...(sNote.keyIdeas || [])])].slice(0, 8);
   tNote.highlightedText = [tNote.highlightedText, sNote.highlightedText].filter(Boolean).join('\n\n').slice(0, 4000);
   tNote.updatedAt = mergedAt;
-
-  fresh.notes[tIdx] = tNote;
+  const locale =
+    detectNoteLocale(
+      tNote.highlightedText,
+      tNote.topicTitle,
+      tNote.refinedNote,
+      tNote.note,
+      tNote.title
+    ) || 'de';
+  const enriched = enrichNoteListFields(tNote, { locale });
+  fresh.notes[tIdx] = enriched;
   fresh.notes.splice(sIdx, 1);
   writeNotes(lecturePath, fresh);
-  return { success: true, note: hydrateNoteForDisplay(tNote), removedNoteId: sourceNoteId };
+  return { success: true, note: hydrateNoteForDisplay(enriched), removedNoteId: sourceNoteId };
 }
 
 function toggleNotePinned(lecturePath, noteId) {
@@ -323,30 +326,21 @@ function appendStudyBlock(lecturePath, noteId, { sectionLabel, content, retitleC
   });
 
   note.refinedNote = rebuildRefinedNote(note);
-  if (isWeakTitle(note.title, note.topicTitle)) {
-    const maybeBetter = buildNoteTitle({
-      title: note.title,
-      topicTitle: note.topicTitle,
-      subtopicTitle: note.subtopicTitle,
-      sectionAnchor: note.sectionAnchor,
-      sectionHeading: note.sectionHeading,
-      keyIdeas: note.keyIdeas,
-      highlightedText: retitleContext?.highlightedText || note.highlightedText,
-      aiAnswerText: note.source === 'tutorChat' ? note.note : '',
-      refinedNote: note.refinedNote,
-      note: note.note,
-      source: note.source,
-      locale: note.outputLocale
-    });
-    if (maybeBetter && maybeBetter !== note.title) {
-      note.title = maybeBetter;
-    }
-  }
   note.updatedAt = addedAt;
-
-  data.notes[idx] = note;
+  const locale =
+    note.outputLocale ||
+    detectNoteLocale(
+      note.highlightedText,
+      note.topicTitle,
+      note.refinedNote,
+      note.note,
+      note.title
+    ) ||
+    'de';
+  const enriched = enrichNoteListFields(note, { locale });
+  data.notes[idx] = enriched;
   writeNotes(lecturePath, data);
-  return { success: true, note: hydrateNoteForDisplay(note) };
+  return { success: true, note: hydrateNoteForDisplay(enriched) };
 }
 
 function deleteStudyAddition(lecturePath, noteId, additionId) {
@@ -408,6 +402,33 @@ function rebuildNoteMetadata(lecturePath, options = {}) {
   return { success: true, updated, total: topicIdFilter ? data.notes.filter((n) => n.topicId === topicIdFilter).length : data.notes.length };
 }
 
+function updateNote(lecturePath, { noteId, title } = {}) {
+  const data = readNotes(lecturePath);
+  const idx = data.notes.findIndex((n) => n.id === noteId);
+  if (idx < 0) return { success: false, error: 'Note not found' };
+  const trimmed = String(title || '').trim().slice(0, 80);
+  if (!trimmed) return { success: false, error: 'Title is empty' };
+
+  const note = data.notes[idx];
+  note.title = trimmed;
+  note.titleEdited = true;
+  note.updatedAt = new Date().toISOString();
+  const locale =
+    note.outputLocale ||
+    detectNoteLocale(
+      note.highlightedText,
+      note.topicTitle,
+      note.refinedNote,
+      note.note,
+      note.title
+    ) ||
+    'de';
+  const enriched = enrichNoteListFields(note, { locale });
+  data.notes[idx] = enriched;
+  writeNotes(lecturePath, data);
+  return { success: true, note: hydrateNoteForDisplay(enriched) };
+}
+
 function deleteNote(lecturePath, noteId) {
   const data = readNotes(lecturePath);
   const before = data.notes.length;
@@ -417,6 +438,49 @@ function deleteNote(lecturePath, noteId) {
   }
   writeNotes(lecturePath, data);
   return { success: true };
+}
+
+function addInlineHighlight(lecturePath, noteId, text) {
+  const data = readNotes(lecturePath);
+  const idx = data.notes.findIndex((n) => n.id === noteId);
+  if (idx < 0) return { success: false, error: 'Note not found' };
+
+  const { cleanHighlightText } = require('../shared/cleanHighlightText.cjs');
+  const snippet = cleanHighlightText(String(text || '')).slice(0, 2000);
+  if (snippet.length < 2) return { success: false, error: 'Selection too short' };
+
+  const note = data.notes[idx];
+  if (!Array.isArray(note.inlineHighlights)) note.inlineHighlights = [];
+  const entry = {
+    id: `nl-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    text: snippet,
+    createdAt: new Date().toISOString()
+  };
+  note.inlineHighlights.push(entry);
+  note.updatedAt = new Date().toISOString();
+  data.notes[idx] = note;
+  writeNotes(lecturePath, data);
+  return { success: true, note: hydrateNoteForDisplay(note), highlight: entry };
+}
+
+function removeInlineHighlight(lecturePath, noteId, highlightId) {
+  const data = readNotes(lecturePath);
+  const idx = data.notes.findIndex((n) => n.id === noteId);
+  if (idx < 0) return { success: false, error: 'Note not found' };
+
+  const note = data.notes[idx];
+  if (!Array.isArray(note.inlineHighlights)) {
+    return { success: false, error: 'Highlight not found' };
+  }
+  const before = note.inlineHighlights.length;
+  note.inlineHighlights = note.inlineHighlights.filter((h) => h.id !== highlightId);
+  if (note.inlineHighlights.length === before) {
+    return { success: false, error: 'Highlight not found' };
+  }
+  note.updatedAt = new Date().toISOString();
+  data.notes[idx] = note;
+  writeNotes(lecturePath, data);
+  return { success: true, note: hydrateNoteForDisplay(note) };
 }
 
 module.exports = {
@@ -429,6 +493,9 @@ module.exports = {
   listPinnedNotes,
   appendStudyBlock,
   deleteStudyAddition,
+  addInlineHighlight,
+  removeInlineHighlight,
+  updateNote,
   deleteNote,
   rebuildNoteMetadata,
   compareNotes

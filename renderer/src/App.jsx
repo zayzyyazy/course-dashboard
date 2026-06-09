@@ -17,6 +17,7 @@ import Toast from './components/Toast';
 import { StudyPinsProvider } from './state/studyPins.jsx';
 import StudyPinOverlay from './components/StudyPinOverlay';
 import { getMaterialTopics, findExerciseTopic, getExerciseSheets } from './utils/lectureMaterial';
+import { useCompactLayout } from './hooks/useCompactLayout';
 
 export default function App() {
   const { state, loading, update } = useStore();
@@ -47,6 +48,7 @@ export default function App() {
   const [selectedExerciseId, setSelectedExerciseId] = useState('');
   const [dashboardKey, setDashboardKey] = useState(0);
   const [sidebarHidden, setSidebarHidden] = useState(false);
+  const compact = useCompactLayout();
 
   useEffect(() => {
     window.api.storeGetAll().then((data) => {
@@ -61,6 +63,13 @@ export default function App() {
       return next;
     });
   }, []);
+
+  useEffect(() => {
+    if (!compact) return;
+    if (view === 'lecture' || view === 'topic') {
+      setSidebarHidden(true);
+    }
+  }, [compact, view, selectedLecture?.path, selectedTopic?.id]);
 
   useEffect(() => {
     if (!selectedLecture?.path) {
@@ -376,7 +385,7 @@ export default function App() {
   return (
     <StudyPinsProvider activeLecturePath={selectedLecture?.path || ''}>
     <div className="flex h-screen bg-bg-primary overflow-hidden">
-      <SidebarShell hidden={sidebarHidden} onToggle={toggleSidebar}>
+      <SidebarShell hidden={sidebarHidden} onToggle={toggleSidebar} compact={compact}>
         <Sidebar
           courses={state.courses}
           selectedCourseId={selectedCourse?.id}
@@ -408,7 +417,9 @@ export default function App() {
             key={dashboardKey}
             courses={state.courses}
             refreshKey={dashboardKey}
+            hasApiKey={Boolean(state.apiKey)}
             onOpenTarget={handleDashboardNavigate}
+            onOpenSettings={() => setView('settings')}
             onSelectCourse={(c) => {
               setSelectedCourse(c);
               setView('course');

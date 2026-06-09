@@ -4,6 +4,9 @@ const CHIPS = [
   { id: 'language_de', label: 'German' },
   { id: 'too_long', label: 'Shorter' },
   { id: 'too_short', label: 'More detail' },
+  { id: 'too_complicated', label: 'Too complicated' },
+  { id: 'too_theoretical', label: 'More practical' },
+  { id: 'too_alarmist', label: 'Less warnings' },
   { id: 'too_shallow', label: 'Go deeper' },
   { id: 'wrong_level', label: 'Wrong level' }
 ];

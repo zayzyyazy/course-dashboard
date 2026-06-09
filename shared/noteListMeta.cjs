@@ -118,6 +118,7 @@ function pickFromHighlight(highlightedText, topicTitle) {
 
 function buildNoteTitle({
   title,
+  titleEdited,
   topicTitle,
   subtopicTitle,
   sectionAnchor,
@@ -130,19 +131,16 @@ function buildNoteTitle({
   source,
   locale
 }) {
-  const fromIdeas = pickFromKeyIdeas(keyIdeas);
-  const fromBody = pickFromBody(refinedNote, note);
-  const fromHighlight = pickFromHighlight(highlightedText, topicTitle);
-
   const derived = deriveStudyNoteTitle({
     title,
+    titleEdited,
     topicTitle,
     subtopicTitle,
     sectionAnchor,
     sectionHeading,
-    highlightedText: fromHighlight || highlightedText,
+    highlightedText,
     aiAnswerText,
-    refinedNote: fromBody || refinedNote,
+    refinedNote,
     note,
     source,
     keyIdeas,
@@ -173,7 +171,6 @@ function inferHelpsWithLine(blob, locale) {
 }
 
 function buildNotePreview({
-  preview,
   keyIdeas,
   refinedNote,
   note,
@@ -183,37 +180,23 @@ function buildNotePreview({
   locale
 }) {
   const s = stringsForLocale(locale);
-  if (
-    preview &&
-    String(preview).trim() &&
-    previewMatchesLocale(preview, locale) &&
-    !/^helps with: clarifies part of/i.test(preview)
-  ) {
-    return String(preview).trim().slice(0, 140);
+  const cleanedBody = String(refinedNote || note || '')
+    .replace(/---\s*AI clarification[\s\S]*?(?=\n##|\n---|$)/gi, '')
+    .replace(/Added while studying[^\n]*/gi, '')
+    .replace(/### Merged from:[^\n]*/gi, '');
+  const body = firstSentence(stripMarkdown(cleanedBody), 140);
+  if (body && normalizeForCompare(body) !== normalizeForCompare(title)) {
+    return body.slice(0, 140);
   }
 
-  const blob = [
-    title,
-    (keyIdeas || []).join(' '),
-    stripMarkdown(refinedNote || note),
-    stripMarkdown(highlightedText)
-  ].join(' ');
-  const inferred = inferHelpsWithLine(blob, locale);
-  if (inferred) return inferred.slice(0, 140);
+  const h = firstSentence(stripMarkdown(highlightedText), 120);
+  if (h && normalizeForCompare(h) !== normalizeForCompare(title)) {
+    return h.slice(0, 140);
+  }
 
   const ideas = pickFromKeyIdeas(keyIdeas);
   if (ideas) {
-    return `${s.helpsWith}: ${ideas}`.slice(0, 140);
-  }
-
-  const body = pickFromBody(refinedNote, note);
-  if (body && normalizeForCompare(body) !== normalizeForCompare(title)) {
-    return `${s.explains}: ${body}`.slice(0, 140);
-  }
-
-  const h = pickFromHighlight(highlightedText, topicTitle);
-  if (h && normalizeForCompare(h) !== normalizeForCompare(title)) {
-    return `${s.clarifies}: ${h}`.slice(0, 140);
+    return ideas.slice(0, 140);
   }
 
   if (topicTitle) {
@@ -245,13 +228,12 @@ function enrichNoteListFields(note, options = {}) {
   const repair = Boolean(options.repairMetadata);
   const mislocalized = repair && metadataLooksMislocalized(note, locale);
   const keepTitle =
-    !options.forceRetitle && !mislocalized && note.title && !isWeakTitle(note.title, topicTitle);
-  const keepPreview =
-    !mislocalized && previewMatchesLocale(note.preview, locale) && String(note.preview || '').trim();
+    Boolean(note.titleEdited) ||
+    (!options.forceRetitle && !mislocalized && note.title && !isWeakTitle(note.title, topicTitle));
   const useTitle = keepTitle ? note.title : '';
-  const usePreview = keepPreview ? note.preview : '';
   const title = buildNoteTitle({
     title: useTitle,
+    titleEdited: note.titleEdited,
     topicTitle,
     subtopicTitle: note.subtopicTitle,
     sectionAnchor: note.sectionAnchor,
@@ -265,7 +247,6 @@ function enrichNoteListFields(note, options = {}) {
     locale
   });
   const preview = buildNotePreview({
-    preview: usePreview,
     keyIdeas: note.keyIdeas,
     refinedNote: note.refinedNote,
     note: note.note,

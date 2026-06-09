@@ -5,7 +5,7 @@ export default function LectureNotesTopicFilter({ options, value, onChange, tota
 
   return (
     <div className="flex flex-wrap items-center gap-1.5 mb-3">
-      <span className="text-[10px] uppercase tracking-wide text-text-muted mr-1">Topic</span>
+      <span className="text-[10px] uppercase tracking-wide text-text-muted mr-1">Filter by topic</span>
       <button
         type="button"
         onClick={() => onChange('all')}

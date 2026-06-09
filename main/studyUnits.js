@@ -170,14 +170,15 @@ async function promoteTopic({
     provenanceLabel
   });
 
-  send('Writing tutor topic cards…');
+  send('Writing tutor topic cards (1/?)…');
   const cardsResult = await topicCardsLlm.generateTopicCards({
     extracted,
     lecture: unit,
     outputLanguage: language,
     domainHint,
     courseProfileBlock,
-    callLlm
+    callLlm,
+    onProgress: (message) => send(message)
   });
 
   if (!cardsResult.ok) {

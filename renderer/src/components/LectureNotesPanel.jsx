@@ -1,6 +1,12 @@
 import React, { useMemo } from 'react';
 import LectureNotesTopicFilter from './LectureNotesTopicFilter';
-import { buildNoteDisplayModel, displayNotePreview, displayNoteTitle } from '../utils/noteDisplay';
+import {
+  buildNoteDisplayModel,
+  displayNotePreview,
+  displayNoteTitle,
+  formatNoteDate,
+  noteContextLabel
+} from '../utils/noteDisplay';
 
 export default function LectureNotesPanel({
   notes,
@@ -9,8 +15,7 @@ export default function LectureNotesPanel({
   onTopicFilterChange,
   topicOptions,
   onOpenNote,
-  onDelete,
-  onOpenTopic
+  onDelete
 }) {
   const total = allNotes?.length ?? notes.length;
   const displayModel = useMemo(() => buildNoteDisplayModel(notes), [notes]);
@@ -24,7 +29,6 @@ export default function LectureNotesPanel({
         <h2 className="text-sm font-semibold text-text-primary uppercase tracking-wide">
           Your notes ({total})
         </h2>
-        <p className="text-xs text-text-muted">Grouped by concept when similar</p>
       </div>
 
       {total > 0 && topicOptions.length > 0 && (
@@ -51,49 +55,45 @@ export default function LectureNotesPanel({
                 {section.topicTitle}
               </p>
               <div className="space-y-2">
-                {section.clusters.map((cluster) => {
-                  const primary = cluster.notes[0];
-                  return (
-                    <div
-                      key={cluster.id}
-                      className="rounded-lg border border-border-subtle bg-bg-secondary p-3 hover:border-accent/30 transition-colors"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <p className="text-sm font-medium text-text-primary truncate">
-                            {cluster.count > 1 ? cluster.label : displayNoteTitle(primary)}
-                          </p>
-                          <p className="text-xs text-text-secondary line-clamp-2 mt-0.5">
-                            {cluster.count > 1 ? cluster.helpsWith : displayNotePreview(primary)}
-                          </p>
-                          {cluster.count > 1 && (
-                            <p className="text-[10px] text-text-muted mt-0.5">
-                              {cluster.count} related notes
-                            </p>
-                          )}
-                        </div>
-                        <div className="flex gap-2 flex-shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => onOpenNote(primary)}
-                            className="text-xs text-accent font-medium"
-                          >
-                            Study
-                          </button>
-                          {cluster.count === 1 && (
-                            <button
-                              type="button"
-                              onClick={() => onDelete(primary.id)}
-                              className="text-xs text-text-muted hover:text-red-400"
-                            >
-                              Delete
-                            </button>
-                          )}
-                        </div>
+                {section.notes.map((note) => (
+                  <div
+                    key={note.id}
+                    className="rounded-lg border border-border-subtle bg-bg-secondary p-3 hover:border-accent/30 transition-colors"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-text-primary truncate">
+                          {displayNoteTitle(note)}
+                        </p>
+                        <p className="text-xs text-text-secondary line-clamp-2 mt-0.5">
+                          {displayNotePreview(note)}
+                        </p>
+                        <p className="text-[10px] text-text-muted mt-1">
+                          {noteContextLabel(note) || section.topicTitle}
+                          {formatNoteDate(note.updatedAt || note.createdAt)
+                            ? ` · ${formatNoteDate(note.updatedAt || note.createdAt)}`
+                            : ''}
+                        </p>
+                      </div>
+                      <div className="flex gap-2 flex-shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => onOpenNote(note)}
+                          className="text-xs text-accent font-medium"
+                        >
+                          Study
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onDelete(note.id)}
+                          className="text-xs text-text-muted hover:text-red-400"
+                        >
+                          Delete
+                        </button>
                       </div>
                     </div>
-                  );
-                })}
+                  </div>
+                ))}
               </div>
             </div>
           ))}

@@ -1,7 +1,21 @@
 const { detectLanguage } = require('./pdf');
 const noteLanguage = require('../shared/noteLanguage.cjs');
 const { buildRegenerateFeedbackBlock } = require('../shared/expandFeedback.cjs');
-const { MATH_OUTPUT_HINT } = require('./courseProfile');
+const { MATH_OUTPUT_HINT, buildExpandProfileBlock } = require('./courseProfile');
+const { inferDomain } = require('./pipeline');
+
+const DEPTH_RULES = {
+  subtopic:
+    'Length: 250–450 words. Structure: 2–3 sentence plain intro → 2–4 short sections max → optional one mini example.',
+  topic:
+    'Length: 350–550 words. Structure: 2–3 sentence plain intro → 2–4 short sections max → optional one mini example.'
+};
+
+const CLARITY_RULES = `Hard rules:
+- Clarify what the card already says — do not add content absent from the source.
+- Do not list every assumption, caveat, or edge case.
+- Do not make the material sound harder than the lecture.
+- No vague "go deeper" filler — be direct and practical.`;
 
 function resolveExpandLanguage(lecturePath, lecture, mode, exerciseId, topic, subtopic, extracted) {
   const { language } = noteLanguage.resolveNoteLanguage({
@@ -19,33 +33,85 @@ function languageRule(language) {
   return noteLanguage.chatLanguagePreservationPrompt(language);
 }
 
-function buildTopicExpandSystem(mode, language, aiCtx) {
+function isStatisticsDomain(courseName, extracted, topic, subtopic) {
+  const hay = [
+    courseName,
+    extracted?.slice(0, 8000),
+    topic?.title,
+    topic?.card?.markdown,
+    subtopic?.title
+  ]
+    .filter(Boolean)
+    .join('\n');
+  return inferDomain(courseName || '', hay).startsWith('statistics');
+}
+
+function buildStatisticsExpandBlock(extracted) {
+  const src = String(extracted || '').slice(0, 12000).toLowerCase();
+  const mentionsSoftware = /jamovi|r\b|spss|excel|software|menü|menu|button|klick|click/.test(src);
+  const softwareLine = mentionsSoftware
+    ? '- Lead with the software workflow shown in the source (menus, buttons, output tables) when relevant.'
+    : '- Prefer practical procedure steps over theory when the source supports it.';
+  return `STATISTICS / JAMOVI EMPHASIS (when source supports it):
+${softwareLine}
+- Include formulas only when the source slide uses them; otherwise describe what to click or read in output.
+- Tone: practical exam prep — not textbook anxiety. Do not stress assumptions beyond what the source mentions.`;
+}
+
+function buildVisionExpandAddition() {
+  return `Attached slide screenshots are from the student's lecture PDF. Describe faithfully what you see (Jamovi UI, tables, diagrams) and align steps with those screenshots. Do not invent UI elements not visible in the images.`;
+}
+
+function expandProfileBlock(profile, displayName, feedback) {
+  return buildExpandProfileBlock(profile, displayName, feedback);
+}
+
+function buildTopicExpandSystem(mode, language, aiCtx, options = {}) {
+  const { extracted = '', feedback = {}, hasVision = false } = options;
+  const profileBlock = expandProfileBlock(aiCtx.profile, aiCtx.displayName, feedback);
+  const statsBlock = isStatisticsDomain(aiCtx.displayName, extracted, options.topic, null)
+    ? `\n\n${buildStatisticsExpandBlock(extracted)}`
+    : '';
+  const visionBlock = hasVision ? `\n\n${buildVisionExpandAddition()}` : '';
+
   const base =
     mode === 'exercise'
       ? `Expand this EXERCISE practice topic in ${language}. Markdown output.
-Focus on problem types, procedures, calculations, worked logic, what to practice for exams — stay source-grounded.
+One level clearer than the card — focused on problem types, procedures, and exam-relevant steps. Stay source-grounded.
+${DEPTH_RULES.topic}
+${CLARITY_RULES}
 ${noteLanguage.languagePreservationPrompt(language)}`
-      : `Expand this topic with deeper tutor explanation in ${language}. Markdown output.
-Go deeper on mechanisms, examples, notation, comparisons — adaptive, not a rigid template.
-If the topic is statistical, mathematical, or computational: include formulas, symbol meanings, procedure steps, and interpretation when the lecture material supports them.
+      : `Expand this lecture topic in ${language}. Markdown output.
+Clarify the topic card — one level clearer, not longer for its own sake. Stay source-grounded.
+${DEPTH_RULES.topic}
+${CLARITY_RULES}
 ${noteLanguage.languagePreservationPrompt(language)}`;
 
-  return `${base}\n\n${languageRule(language)}\n\n${MATH_OUTPUT_HINT}\n\n${aiCtx.block}`;
+  return `${base}${statsBlock}${visionBlock}\n\n${languageRule(language)}\n\n${MATH_OUTPUT_HINT}\n\n${profileBlock}`;
 }
 
-function buildSubtopicExpandSystem(mode, language, aiCtx) {
+function buildSubtopicExpandSystem(mode, language, aiCtx, options = {}) {
+  const { extracted = '', feedback = {}, topic, subtopic, hasVision = false } = options;
+  const profileBlock = expandProfileBlock(aiCtx.profile, aiCtx.displayName, feedback);
+  const statsBlock = isStatisticsDomain(aiCtx.displayName, extracted, topic, subtopic)
+    ? `\n\n${buildStatisticsExpandBlock(extracted)}`
+    : '';
+  const visionBlock = hasVision ? `\n\n${buildVisionExpandAddition()}` : '';
+
   const base =
     mode === 'exercise'
       ? `Expand ONE subtopic from an exercise/practice sheet in ${language}. Markdown output only.
-Scope strictly to this subtopic — not the whole parent topic. Focus on procedures, problem types, steps, and exam-relevant application.
-Start with 2-3 short plain sentences as an intro, then deeper detail. Stay source-grounded.
+Scope strictly to this subtopic — not the whole parent topic. Focus on procedures, problem types, and exam-relevant application.
+${DEPTH_RULES.subtopic}
+${CLARITY_RULES}
 ${noteLanguage.languagePreservationPrompt(language)}`
       : `Expand ONE subtopic from a lecture topic in ${language}. Markdown output only.
-Scope strictly to this subtopic — not the entire parent topic. Go deeper on mechanisms, notation, examples for THIS subtopic only.
-Start with 2-3 short plain sentences as an intro, then deeper detail. Stay source-grounded.
+Scope strictly to this subtopic — not the entire parent topic. Clarify what the card already covers.
+${DEPTH_RULES.subtopic}
+${CLARITY_RULES}
 ${noteLanguage.languagePreservationPrompt(language)}`;
 
-  return `${base}\n\n${languageRule(language)}\n\n${MATH_OUTPUT_HINT}\n\n${aiCtx.block}`;
+  return `${base}${statsBlock}${visionBlock}\n\n${languageRule(language)}\n\n${MATH_OUTPUT_HINT}\n\n${profileBlock}`;
 }
 
 function buildTopicExpandUser({ lecture, aiCtx, mode, topic, extracted, feedback, previousMarkdown }) {
@@ -90,5 +156,10 @@ module.exports = {
   buildTopicExpandSystem,
   buildSubtopicExpandSystem,
   buildTopicExpandUser,
-  buildSubtopicExpandUser
+  buildSubtopicExpandUser,
+  buildStatisticsExpandBlock,
+  buildVisionExpandAddition,
+  isStatisticsDomain,
+  DEPTH_RULES,
+  CLARITY_RULES
 };

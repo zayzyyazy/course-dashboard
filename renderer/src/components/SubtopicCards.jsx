@@ -6,11 +6,15 @@ import TitleWithMath from './TitleWithMath';
 import StudiedToggleButton, { subtopicCardStudiedClasses } from './StudiedToggleButton';
 import SubtopicExerciseLink from './SubtopicExerciseLink';
 import SubtopicConfidence from './SubtopicConfidence';
+import SubtopicCardMarkers from './SubtopicCardMarkers';
 import { hasExerciseForLecture, getMaterialTopics } from '../utils/lectureMaterial';
 import { subtopicAnchor } from '@shared/noteAnchor.cjs';
+import { cardMarkersForSubtopic } from '@shared/noteCardMarkers.cjs';
 import { isSubtopicStudied, normalizeConfidence } from '../utils/studyState';
 import PinButton from './PinButton';
 import RegenerateFeedbackBar from './RegenerateFeedbackBar';
+import DeepPdfFigures from './DeepPdfFigures';
+import { courseHasPracticeCoach, openPracticeCoach, resolveEpcVaultKey } from '../utils/openPracticeCoach';
 
 export default function SubtopicCards({
   topic,
@@ -27,7 +31,10 @@ export default function SubtopicCards({
   onNotify,
   initialOpenSubtopicId,
   onInitialSubtopicConsumed,
-  onToggleSubtopicPin
+  onToggleSubtopicPin,
+  lectureNotes = [],
+  onOpenSavedNote,
+  onDeleteCardMarker
 }) {
   const subtopics = topic?.subtopics || [];
   const path = lecturePath || lecture?.path;
@@ -43,8 +50,28 @@ export default function SubtopicCards({
 
   const showExerciseLinks =
     materialMode === 'lecture' && hasExerciseForLecture(lecture) && onOpenExerciseSubtopic;
+  const showPracticeCoach =
+    materialMode === 'lecture' && courseHasPracticeCoach(course) && lecture?.id && topic?.id;
 
   if (!subtopics.length) return null;
+
+  async function handleOpenPractice(sub, e) {
+    e?.stopPropagation();
+    try {
+      await openPracticeCoach(
+        {
+          courseStorageKey: course?.storageKey,
+          courseName: course?.name,
+          unitId: lecture?.id || '',
+          topicId: topic?.id || '',
+          subtopicId: sub?.id || ''
+        },
+        onNotify
+      );
+    } catch {
+      /* onNotify already shown */
+    }
+  }
 
   function applyServerLecture(updated) {
     if (!updated) return null;
@@ -187,6 +214,12 @@ export default function SubtopicCards({
           const subStudied = isSubtopicStudied(sub);
           const busy = busyId === sub.id;
           const confidence = normalizeConfidence(sub.studyConfidence);
+          const markers = cardMarkersForSubtopic(lectureNotes, {
+            topicId: topic.id,
+            subtopicId: sub.id,
+            materialMode,
+            exerciseId: materialMode === 'exercise' ? exerciseId : ''
+          });
 
           return (
             <div
@@ -221,7 +254,14 @@ export default function SubtopicCards({
                       </p>
                     )}
                     {sub.deepMarkdown && !isOpen && (
-                      <p className="text-[10px] text-accent/80 mt-1 pl-8">Deeper explanation ready</p>
+                      <>
+                        <p className="text-[10px] text-accent/80 mt-1 pl-8">Deeper explanation ready</p>
+                        {markers.length > 0 && (
+                          <p className="text-[10px] text-text-muted mt-0.5 pl-8">
+                            {markers.length} saved highlight{markers.length === 1 ? '' : 's'} on card
+                          </p>
+                        )}
+                      </>
                     )}
                     {showExerciseLinks && sub.exerciseLink && (
                       <div className="pl-8 mt-2">
@@ -229,6 +269,22 @@ export default function SubtopicCards({
                           link={sub.exerciseLink}
                           onOpen={onOpenExerciseSubtopic}
                         />
+                      </div>
+                    )}
+                    {showPracticeCoach && (
+                      <div className="pl-8 mt-2">
+                        <button
+                          type="button"
+                          onClick={(e) => handleOpenPractice(sub, e)}
+                          className={`text-xs px-3 py-1.5 rounded-md border font-medium ${
+                            subStudied
+                              ? 'border-violet-400/70 bg-violet-500/25 text-violet-50 hover:bg-violet-500/35'
+                              : 'border-violet-500/40 bg-violet-500/10 text-violet-200 hover:border-violet-400/60'
+                          }`}
+                          title="Open exercises in Exam Practice Coach"
+                        >
+                          ▶ Practice in Exercise Coach
+                        </button>
                       </div>
                     )}
                   </div>
@@ -276,9 +332,21 @@ export default function SubtopicCards({
                       onRegenerate={(feedback) => handleRegenerateSubtopic(sub, feedback)}
                     />
                   </div>
+                  <DeepPdfFigures
+                    lecturePath={path}
+                    figures={sub.deepFigures}
+                    className="mb-3"
+                  />
                   <HighlightableMarkdown
                     markdownSource={sub.deepMarkdown}
                     sectionAnchor={subtopicAnchor(sub)}
+                    saveLabel="Save on card"
+                    notesSaveLabel="Save to notes"
+                    showNotesSave
+                    savedHighlights={markers.map((m) => ({
+                      id: m.id,
+                      highlightedText: m.highlightedText
+                    }))}
                     pinSource={{
                       lecturePath: path,
                       lectureTitle: lecture?.title,
@@ -300,9 +368,17 @@ export default function SubtopicCards({
                     onHighlight={(text, meta) =>
                       onHighlightSave(text, 'deep', sub, meta)
                     }
+                    onDeleteSavedHighlight={onDeleteCardMarker}
                   >
                     {sub.deepMarkdown}
                   </HighlightableMarkdown>
+                  <SubtopicCardMarkers
+                    markers={markers}
+                    allNotes={lectureNotes}
+                    onOpenNote={onOpenSavedNote}
+                    onOpenLinkedNote={onOpenSavedNote}
+                    onDelete={onDeleteCardMarker}
+                  />
                 </div>
               )}
               {isOpen && sub.summary && !sub.deepMarkdown && (

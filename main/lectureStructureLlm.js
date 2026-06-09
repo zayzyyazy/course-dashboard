@@ -230,6 +230,11 @@ function buildUserPayload({ materials, meta, courseContext, currentLectureId }) 
 function parseJsonPayload(raw) {
   const text = (raw || '').trim();
   if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    // fall through to fence / brace slicing
+  }
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
   const payload = fenced ? fenced[1].trim() : text;
   const start = payload.indexOf('{');
@@ -353,13 +358,17 @@ async function extractLectureStructureWithLlm(opts) {
   }
 
   if (!normalized || !structureQualityOk(normalized)) {
+    const debug = {
+      parsedTopics: parsed?.topics?.map((t) => t.title) || [],
+      rawPreview: (raw || '').slice(0, 400),
+      hasCandidate: Boolean(candidate),
+      qualityOk: normalized ? structureQualityOk(normalized) : false,
+      extractedChars: materials.extracted.length
+    };
     return {
       ok: false,
       error: 'LLM structure failed validation',
-      debug: {
-        parsedTopics: parsed?.topics?.map((t) => t.title) || [],
-        rawPreview: (raw || '').slice(0, 400)
-      }
+      debug
     };
   }
 

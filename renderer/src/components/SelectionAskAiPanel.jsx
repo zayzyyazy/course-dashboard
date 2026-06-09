@@ -159,7 +159,7 @@ export default function SelectionAskAiPanel({
         )}
         {answer && !loading && (
           <div className="pt-2 prose-note">
-            <MarkdownView className="markdown-body-chat text-sm">{answer}</MarkdownView>
+            <MarkdownView className="markdown-body-study-chat">{answer}</MarkdownView>
           </div>
         )}
         {!loading && !error && !answer && (

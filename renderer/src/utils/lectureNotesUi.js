@@ -1,10 +1,7 @@
-export function sortLectureNotes(notes) {
-  return [...notes].sort((a, b) => {
-    const topicA = (a.topicTitle || '\uffff').toLowerCase();
-    const topicB = (b.topicTitle || '\uffff').toLowerCase();
-    if (topicA !== topicB) return topicA.localeCompare(topicB);
-    return new Date(a.createdAt) - new Date(b.createdAt);
-  });
+import { filterNotesByQuery as filterNotesByQueryShared } from '@shared/noteSearch.cjs';
+
+export function filterNotesByQuery(notes, query) {
+  return filterNotesByQueryShared(notes, query);
 }
 
 export function topicFilterOptions(notes) {

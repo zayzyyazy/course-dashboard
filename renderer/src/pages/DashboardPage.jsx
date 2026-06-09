@@ -1,7 +1,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import TitleWithMath from '../components/TitleWithMath';
 import PinnedItemsSection from '../components/PinnedItemsSection';
+import DashboardAskPanel from '../components/DashboardAskPanel';
 import { pinToNavTarget } from '../utils/dashboardPinNav';
+import { courseHasPracticeCoach } from '../utils/openPracticeCoach';
+import { fetchEpcPracticeStats } from '../utils/epcPracticeStats';
 
 function formatExamShort(days) {
   if (days == null) return null;
@@ -19,15 +22,27 @@ function ProgressBar({ percent }) {
   );
 }
 
-export default function DashboardPage({ courses, onOpenTarget, onImportPdf, refreshKey = 0 }) {
+export default function DashboardPage({
+  courses,
+  onOpenTarget,
+  onImportPdf,
+  onOpenSettings,
+  hasApiKey = false,
+  refreshKey = 0
+}) {
   const [data, setData] = useState(null);
+  const [epcStats, setEpcStats] = useState(null);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const res = await window.api.getDashboardOverview();
+    const [res, practice] = await Promise.all([
+      window.api.getDashboardOverview(),
+      fetchEpcPracticeStats()
+    ]);
     if (res?.success) setData(res);
     else setData(null);
+    setEpcStats(practice);
     setLoading(false);
   }, []);
 
@@ -75,12 +90,20 @@ export default function DashboardPage({ courses, onOpenTarget, onImportPdf, refr
     return (
       <div className="h-full overflow-y-auto no-drag">
         <div className="h-8 drag-region" />
-        <div className="max-w-3xl mx-auto px-8 py-10">
+        <div className="max-w-4xl mx-auto px-8 py-6 pb-12">
           <h1 className="text-2xl font-bold text-text-primary mb-2">Study overview</h1>
-          <p className="text-text-secondary mb-8 leading-relaxed">
-            Import a lecture to start tracking progress and priorities across courses.
+          <p className="text-sm text-text-secondary mb-5">
+            Import lectures to track progress — expand <span className="text-accent">Ask about my study plan</span>{' '}
+            below once you have courses.
           </p>
-          <div className="rounded-xl border border-dashed border-border-DEFAULT p-10 text-center">
+          <DashboardAskPanel
+            hasApiKey={hasApiKey}
+            topPick={null}
+            onOpenTarget={openTarget}
+            onOpenSettings={onOpenSettings}
+          />
+          <div className="rounded-xl border border-dashed border-border-DEFAULT p-10 text-center mt-4">
+            <p className="text-text-secondary mb-4">No courses yet.</p>
             <button
               type="button"
               onClick={onImportPdf}
@@ -104,7 +127,7 @@ export default function DashboardPage({ courses, onOpenTarget, onImportPdf, refr
           <div>
             <h1 className="text-2xl font-bold text-text-primary">Study overview</h1>
             <p className="text-sm text-text-secondary mt-0.5">
-              Pinned shortcuts · one best step · one next step per course
+              Ask AI about your plan · pinned shortcuts · best next step per course
             </p>
           </div>
           <button
@@ -115,6 +138,13 @@ export default function DashboardPage({ courses, onOpenTarget, onImportPdf, refr
             Refresh
           </button>
         </div>
+
+        <DashboardAskPanel
+          hasApiKey={hasApiKey}
+          topPick={topPick}
+          onOpenTarget={openTarget}
+          onOpenSettings={onOpenSettings}
+        />
 
         <section className="mb-6">
           {pinnedItems.length > 0 ? (
@@ -174,7 +204,12 @@ export default function DashboardPage({ courses, onOpenTarget, onImportPdf, refr
         <section>
           <h2 className="text-sm font-semibold text-text-primary mb-3">Courses</h2>
           <div className="grid gap-3 sm:grid-cols-2">
-            {courseCards.map((c) => (
+            {courseCards.map((c) => {
+              const practiceRow =
+                epcStats && courseHasPracticeCoach({ storageKey: c.storageKey })
+                  ? epcStats[c.storageKey]
+                  : null;
+              return (
               <button
                 key={c.id}
                 type="button"
@@ -223,6 +258,17 @@ export default function DashboardPage({ courses, onOpenTarget, onImportPdf, refr
                   )}
                   <span>·</span>
                   <span>{c.difficultyLabel || `D${c.studyMeta?.personalDifficulty}`}</span>
+                  {practiceRow && (
+                    <>
+                      <span>·</span>
+                      <span className="text-violet-300/90">
+                        {practiceRow.attempts_count || 0} exercises
+                        {practiceRow.cd_total > 0
+                          ? ` · ${practiceRow.cd_studied}/${practiceRow.cd_total} practiced`
+                          : ''}
+                      </span>
+                    </>
+                  )}
                 </div>
                 {c.statusLine && (
                   <p className="text-[10px] text-text-muted mt-1.5 line-clamp-2">{c.statusLine}</p>
@@ -241,7 +287,8 @@ export default function DashboardPage({ courses, onOpenTarget, onImportPdf, refr
                   <p className="text-xs text-text-muted mt-1.5">No next step — course complete</p>
                 )}
               </button>
-            ))}
+            );
+            })}
           </div>
         </section>
       </div>

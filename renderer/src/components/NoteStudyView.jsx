@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
-import MarkdownView from './MarkdownView';
+import React, { useEffect, useMemo, useState } from 'react';
+import HighlightableMarkdown from './HighlightableMarkdown';
 import NoteChatPanel from './NoteChatPanel';
 import { coursePayload } from '../utils/courseApi';
+import { prepareStudyMarkdown } from '../utils/prepareStudyMarkdown';
 import PinButton from './PinButton';
 import HighlightPreviewText from './HighlightPreviewText';
 
@@ -33,12 +34,31 @@ export default function NoteStudyView({
 
   useEffect(() => {
     setActiveNote(note);
-  }, [note?.id, note?.updatedAt, note?.refinedNote]);
+  }, [note?.id, note?.updatedAt, note?.refinedNote, note?.inlineHighlights]);
+
+  const body = activeNote?.refinedNote || activeNote?.note || '';
+  const preparedBody = useMemo(() => prepareStudyMarkdown(body), [body]);
+  const additions = activeNote?.studyAdditions || [];
+
+  const savedHighlights = useMemo(() => {
+    return (activeNote?.inlineHighlights || []).map((h) => ({
+      id: h.id,
+      highlightedText: h.text
+    }));
+  }, [activeNote?.inlineHighlights]);
 
   if (!activeNote) return null;
 
-  const body = activeNote.refinedNote || activeNote.note;
-  const additions = activeNote.studyAdditions || [];
+  const selectionAskContext = {
+    course,
+    lecturePath: lecture?.path,
+    topicId: activeNote.topicId || '',
+    materialMode: activeNote.materialMode || 'lecture',
+    lectureTitle: lecture?.title || '',
+    topicTitle: activeNote.topicTitle || '',
+    subtopicTitle: activeNote.subtopicTitle || '',
+    noteTitle: activeNote.title || activeNote.topicTitle || ''
+  };
 
   async function handleAddToNote({ excerpt, isSelection }) {
     return window.api.appendToNoteFromStudy({
@@ -60,6 +80,18 @@ export default function NoteStudyView({
     return result;
   }
 
+  async function handleSaveInlineHighlight(text) {
+    const res = await window.api.addNoteInlineHighlight({
+      lecturePath: lecture.path,
+      noteId: activeNote.id,
+      text
+    });
+    if (res?.success && res.note) {
+      setActiveNote(res.note);
+      onNoteUpdated?.(res.note);
+    }
+  }
+
   async function handleRemoveAddition(additionId) {
     setRemovingId(additionId);
     try {
@@ -74,6 +106,18 @@ export default function NoteStudyView({
       }
     } finally {
       setRemovingId(null);
+    }
+  }
+
+  async function handleDeleteSavedHighlight(highlightId) {
+    const res = await window.api.removeNoteInlineHighlight({
+      lecturePath: lecture.path,
+      noteId: activeNote.id,
+      highlightId
+    });
+    if (res?.success && res.note) {
+      setActiveNote(res.note);
+      onNoteUpdated?.(res.note);
     }
   }
 
@@ -121,8 +165,8 @@ export default function NoteStudyView({
       </header>
 
       <div className="flex-1 min-h-0 grid lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-border-DEFAULT">
-        <div className="overflow-y-auto p-6">
-          <blockquote className="text-sm text-text-secondary border-l-2 border-accent/50 pl-3 mb-4 max-h-40 overflow-y-auto">
+        <div className="overflow-y-auto p-6 lg:p-8">
+          <blockquote className="study-reading-caption border-l-2 border-accent/50 pl-4 mb-5 max-h-48 overflow-y-auto">
             <HighlightPreviewText text={activeNote.highlightedText} />
           </blockquote>
 
@@ -140,8 +184,26 @@ export default function NoteStudyView({
           )}
 
           {body ? (
-            <div className="rounded-xl border border-border-DEFAULT bg-bg-secondary p-5 prose-note">
-              <MarkdownView className="markdown-body-note-study">{body}</MarkdownView>
+            <div className="rounded-xl border border-border-DEFAULT bg-bg-secondary p-5 lg:p-6 study-reading-panel">
+              <HighlightableMarkdown
+                markdownSource={body}
+                contentVariant="study"
+                savedHighlights={savedHighlights}
+                onDeleteSavedHighlight={handleDeleteSavedHighlight}
+                saveLabel="Highlight"
+                pinSource={{
+                  lecturePath: lecture.path,
+                  lectureTitle: lecture.title,
+                  topicTitle: activeNote.topicTitle,
+                  subtopicTitle: activeNote.subtopicTitle,
+                  sourceType: 'note'
+                }}
+                askContext={selectionAskContext}
+                hasApiKey={hasApiKey}
+                onHighlight={handleSaveInlineHighlight}
+              >
+                {preparedBody}
+              </HighlightableMarkdown>
             </div>
           ) : (
             <p className="text-sm text-text-muted">No note body — ask AI about the highlight.</p>
@@ -177,11 +239,13 @@ export default function NoteStudyView({
           )}
 
           {activeNote.note && activeNote.refinedNote && activeNote.note !== activeNote.refinedNote && (
-            <div className="mt-6">
+            <div className="mt-6 study-reading-panel">
               <p className="text-xs font-medium text-text-muted uppercase tracking-wide mb-2">
                 Original draft
               </p>
-              <p className="text-sm text-text-muted whitespace-pre-wrap">{activeNote.note}</p>
+              <p className="text-base text-text-muted leading-relaxed whitespace-pre-wrap">
+                {activeNote.note}
+              </p>
             </div>
           )}
         </div>

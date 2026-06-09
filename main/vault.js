@@ -444,7 +444,17 @@ function markLectureOpened(itemPath) {
   item.studyState = item.studyState || {};
   item.studyState.opened = true;
   item.studyState.lastOpenedAt = new Date().toISOString();
+  if (item.studyState.lastRewindAt === undefined) item.studyState.lastRewindAt = null;
   return writeCourseItem(itemPath, item);
+}
+
+function markRewindRead(itemPath) {
+  const item = readCourseItem(itemPath);
+  if (!item) return null;
+  item.studyState = item.studyState || {};
+  item.studyState.lastRewindAt = new Date().toISOString();
+  writeCourseItem(itemPath, item);
+  return enrichItem(item, itemPath);
 }
 
 function toggleItemPinned(itemPath) {
@@ -731,6 +741,7 @@ module.exports = {
   reorderLectures,
   deleteLecture,
   markLectureOpened,
+  markRewindRead,
   markTopicStudied,
   toggleTopicStudied,
   toggleSubtopicStudied,

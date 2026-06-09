@@ -1,7 +1,9 @@
 import React from 'react';
+import LectureNotesPreview from './LectureNotesPreview';
 
-/** Compact notes entry — no previews on the main learning screen. */
-export default function LectureNotesEntry({ count, onOpen }) {
+export default function LectureNotesEntry({ notes = [], onOpen, onOpenNote }) {
+  const count = notes.length;
+
   if (!count) {
     return (
       <p className="mb-4 text-[11px] text-text-muted">
@@ -11,15 +13,16 @@ export default function LectureNotesEntry({ count, onOpen }) {
   }
 
   return (
-    <button
-      type="button"
-      onClick={onOpen}
-      className="mb-4 w-full flex items-center justify-between gap-2 rounded-lg border border-border-subtle bg-bg-secondary/25 px-3 py-2 text-left hover:border-accent/30 hover:bg-bg-secondary/50 transition-colors"
-    >
-      <span className="text-xs text-text-secondary">
-        <span className="font-medium text-text-primary">{count}</span> saved note{count === 1 ? '' : 's'}
-      </span>
-      <span className="text-[11px] text-accent font-medium">View notes →</span>
-    </button>
+    <div className="mb-4">
+      <LectureNotesPreview
+        notes={notes}
+        totalCount={count}
+        onOpenNote={(note) => {
+          if (onOpenNote) onOpenNote(note);
+          else onOpen?.();
+        }}
+        onViewAll={onOpen}
+      />
+    </div>
   );
 }

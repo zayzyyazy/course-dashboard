@@ -1,7 +1,25 @@
 /**
  * Deterministic study-note title derivation.
- * Keeps titles short, concept-focused, and German-friendly.
+ * Priority: user title → subtopic → section → key idea → body line → short highlight → source + topic.
  */
+
+const SOURCE_HINTS = {
+  tutorChat: 'Tutor answer',
+  noteChat: 'Note study',
+  deep: 'Deeper dive',
+  card: 'Topic card',
+  exercise: 'Exercise',
+  note: 'Note'
+};
+
+const SOURCE_HINTS_DE = {
+  tutorChat: 'Tutor-Antwort',
+  noteChat: 'Notiz-Chat',
+  deep: 'Vertiefung',
+  card: 'Themenkarte',
+  exercise: 'Übung',
+  note: 'Notiz'
+};
 
 function stripMarkdown(text) {
   return String(text || '')
@@ -22,14 +40,6 @@ function normalizeForMatch(s) {
     .trim();
 }
 
-function titleCaseToken(word) {
-  if (!word) return '';
-  if (/^(ss_between|ss_within|ss_total)$/i.test(word)) return word.toUpperCase();
-  if (/^f-test$/i.test(word)) return 'F-Test';
-  if (/^eta2$|^eta²$|^η²$/i.test(word)) return 'Eta²';
-  return word.charAt(0).toUpperCase() + word.slice(1);
-}
-
 function cleanTitle(raw) {
   let t = stripMarkdown(raw)
     .replace(/\s+/g, ' ')
@@ -45,11 +55,14 @@ function cleanTitle(raw) {
 }
 
 function isWeakNoteTitle(title, topicTitle = '') {
-  const t = normalizeForMatch(title);
+  const raw = String(title || '').trim();
+  const t = normalizeForMatch(raw);
   const topic = normalizeForMatch(topicTitle);
   if (!t) return true;
   if (t.length < 3) return true;
-  if (t.length > 70) return true;
+  if (t.length > 55) return true;
+  const words = t.split(' ').filter(Boolean);
+  if (words.length > 8) return true;
   if (topic && t === topic) return true;
   if (topic && t.startsWith(topic) && t.length <= topic.length + 14) return true;
   if (/^(note|notiz|highlight|saved note|ai clarification|ai-erklaerung|ai erklärung)$/i.test(t)) {
@@ -58,48 +71,18 @@ function isWeakNoteTitle(title, topicTitle = '') {
   if (/^(aus topic tutor|tutor answer|from note study|aus notiz-chat)/i.test(t)) {
     return true;
   }
-  if (/[.?!]\s/.test(t) && t.split(' ').length > 7) return true;
+  if (/^helps with:|^hilft bei:/i.test(t)) return true;
+  if (/^explains:|^erklärt:|^clarifies:|^erlaeutert:/i.test(t)) return true;
+  if (/^[a-zäöüß]/.test(raw)) return true;
+  if (
+    /\b(von|und|der|die|das|den|dem|des|ein|eine|einer|einem|einen|ob|wenn|dass|als|mit|für|bei|an|in|zu|the|a|an|of|to|and|or|if|that|when|with|for|by|at|in|on)$/i.test(
+      t
+    )
+  ) {
+    return true;
+  }
+  if (/angenommen|beispiel:|example:|ein beispiel|assume /i.test(t) && words.length > 4) return true;
   return false;
-}
-
-function heuristicTitle(blob) {
-  const b = normalizeForMatch(blob);
-  if (!b) return '';
-
-  if (/defining sets by enumeration|enumeration|aufz(a|ä)hlung|listing elements|mengen aufz(a|ä)hlen/i.test(b)) {
-    return 'Mengen aufzählen';
-  }
-  if (/reihenfolge (irrelevant|egal)|order irrelevant|order does not matter|ordnung irrelevant/i.test(b)) {
-    return 'Reihenfolge in Mengen';
-  }
-  if (/(eta[-\s]?(quadrat|2)|eta²|η²|effektst(a|ä)rke|effect size)/i.test(b)) {
-    return 'Eta² / Effektstärke';
-  }
-  if (/(ss_between|ssbetween|sum of squares|quadratsumme|quadratsummen|ss_within|ss_total)/i.test(b)) {
-    return /beispiel|example|aufgabe/i.test(b) ? 'Beispiel für SS_between' : 'SS_between berechnen';
-  }
-  if (/\bf[-\s]?test\b|f-wert|f statistic|anova|signifikanztest/i.test(b)) {
-    return /beispiel|example|aufgabe/i.test(b) ? 'Beispiel für F-Test' : 'F-Test interpretieren';
-  }
-  if (/vereinigung|[^a-z]∪| union /i.test(b)) {
-    return 'Vereinigung von Mengen';
-  }
-  if (/schnitt|[^a-z]∩| intersection /i.test(b)) {
-    return 'Schnitt von Mengen';
-  }
-  if (/differenz|[^a-z]∖|\\setminus| minus /i.test(b)) {
-    return 'Differenz von Mengen';
-  }
-  if (/kardinalit(a|ä)t|\|a\||\|b\||cardinality/i.test(b)) {
-    return 'Kardinalität berechnen';
-  }
-  if (/leere menge|empty set|{}|∅/i.test(b)) {
-    return 'Leere Menge als Element';
-  }
-  if (/belongs to set|zugeh(o|ö)rigkeit|[^a-z]∈|[^a-z]∉|element .* menge|membership|notin/i.test(b)) {
-    return 'Element in Menge prüfen';
-  }
-  return '';
 }
 
 function anchorToLabel(anchor) {
@@ -107,65 +90,91 @@ function anchorToLabel(anchor) {
   if (!a) return '';
   const cleaned = a.replace(/^sub-/, '').replace(/-/g, ' ').trim();
   if (!cleaned) return '';
-  const words = cleaned.split(' ').filter(Boolean).slice(0, 6).map(titleCaseToken);
-  return cleanTitle(words.join(' '));
+  return cleanTitle(cleaned);
 }
 
-function contextLabel({ sectionHeading, sectionAnchor, subtopicTitle, topicTitle, source }) {
-  const section = cleanTitle(sectionHeading) || anchorToLabel(sectionAnchor);
-  if (section && !isWeakNoteTitle(section, topicTitle)) return section;
-  const subtopic = cleanTitle(subtopicTitle);
-  if (subtopic && !isWeakNoteTitle(subtopic, topicTitle)) return subtopic;
-  if (source === 'tutorChat' || source === 'noteChat') {
-    const topic = cleanTitle(topicTitle);
-    if (topic) return `${topic} klären`.slice(0, 55);
-  }
-  return cleanTitle(topicTitle);
+function firstWords(text, maxWords = 6) {
+  const h = stripMarkdown(text);
+  if (!h || h.length < 8) return '';
+  return h.split(/\s+/).filter(Boolean).slice(0, maxWords).join(' ');
+}
+
+function firstBodyLine(refinedNote, note) {
+  const raw = String(refinedNote || note || '')
+    .replace(/---\s*AI clarification[\s\S]*?(?=\n##|\n---|$)/gi, '')
+    .replace(/Added while studying[^\n]*/gi, '');
+  const lines = raw
+    .split('\n')
+    .map((l) => stripMarkdown(l))
+    .filter((l) => l.length >= 12 && l.length <= 70 && !/^merged from:/i.test(l));
+  return lines[0] || '';
+}
+
+function sourceHint(source, locale) {
+  const map = locale === 'de' ? SOURCE_HINTS_DE : SOURCE_HINTS;
+  return map[source] || map.note;
 }
 
 function shortenNoteTitle(title) {
   const cleaned = cleanTitle(title);
   if (!cleaned) return '';
   const words = cleaned.split(' ').filter(Boolean);
-  if (words.length <= 6 && cleaned.length <= 55) return cleaned;
-  return words.slice(0, 6).join(' ').slice(0, 55).trim();
+  if (words.length <= 8 && cleaned.length <= 55) return cleaned;
+  return words.slice(0, 8).join(' ').slice(0, 55).trim();
 }
 
 function deriveStudyNoteTitle(input = {}) {
-  const explicit = cleanTitle(input.title);
-  if (explicit && !isWeakNoteTitle(explicit, input.topicTitle)) {
-    return shortenNoteTitle(explicit);
+  if (input.titleEdited && input.title) {
+    return shortenNoteTitle(input.title);
   }
 
-  const blob = [
-    input.sectionHeading,
-    input.sectionAnchor,
-    input.subtopicTitle,
-    input.topicTitle,
-    input.highlightedText,
-    input.aiAnswerText,
-    input.refinedNote,
-    input.note,
-    (input.keyIdeas || []).join(' ')
-  ]
-    .map((x) => String(x || '').trim())
-    .filter(Boolean)
-    .join('\n');
-
-  const heuristic = heuristicTitle(blob);
-  if (heuristic) return heuristic;
-
-  const context = contextLabel(input);
-  if (context && !isWeakNoteTitle(context, input.topicTitle)) {
-    return shortenNoteTitle(context);
+  const rawTitle = String(input.title || '').trim();
+  if (rawTitle && !isWeakNoteTitle(rawTitle, input.topicTitle)) {
+    return shortenNoteTitle(cleanTitle(rawTitle));
   }
 
-  const fallback = cleanTitle(input.topicTitle) || 'Notiz';
-  return shortenNoteTitle(fallback);
+  const subtopic = cleanTitle(input.subtopicTitle);
+  if (
+    subtopic &&
+    normalizeForMatch(subtopic) !== normalizeForMatch(input.topicTitle) &&
+    !isWeakNoteTitle(subtopic, input.topicTitle)
+  ) {
+    return shortenNoteTitle(subtopic);
+  }
+
+  const section = cleanTitle(input.sectionHeading) || anchorToLabel(input.sectionAnchor);
+  if (section && !isWeakNoteTitle(section, input.topicTitle)) {
+    return shortenNoteTitle(section);
+  }
+
+  const idea = cleanTitle((input.keyIdeas || [])[0]);
+  if (idea && !isWeakNoteTitle(idea, input.topicTitle)) {
+    return shortenNoteTitle(idea);
+  }
+
+  const bodyLine = cleanTitle(firstBodyLine(input.refinedNote, input.note));
+  if (bodyLine && !isWeakNoteTitle(bodyLine, input.topicTitle)) {
+    return shortenNoteTitle(bodyLine);
+  }
+
+  const highlight = cleanTitle(firstWords(input.highlightedText, 6));
+  if (highlight && !isWeakNoteTitle(highlight, input.topicTitle)) {
+    return shortenNoteTitle(highlight);
+  }
+
+  const locale = input.locale === 'de' ? 'de' : 'en';
+  const topic = cleanTitle(input.topicTitle);
+  if (input.source && topic) {
+    return shortenNoteTitle(`${sourceHint(input.source, locale)} · ${topic}`);
+  }
+
+  return shortenNoteTitle(topic) || (locale === 'de' ? 'Notiz' : 'Note');
 }
 
 module.exports = {
   deriveStudyNoteTitle,
   isWeakNoteTitle,
-  shortenNoteTitle
+  shortenNoteTitle,
+  firstWords,
+  firstBodyLine
 };

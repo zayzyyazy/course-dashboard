@@ -6,11 +6,13 @@ import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import { normalizeMathMarkdown } from '../utils/mathMarkdown';
 
-export default function MarkdownView({ children, className = '' }) {
+export default function MarkdownView({ children, className = '', variant = 'reading' }) {
   const content = useMemo(() => normalizeMathMarkdown(children || ''), [children]);
+  const baseClass =
+    variant === 'study' ? 'markdown-body markdown-body-study' : 'markdown-body markdown-body-reading';
 
   return (
-    <div className={`markdown-body markdown-body-reading ${className}`}>
+    <div className={`${baseClass} ${className}`.trim()}>
       <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
         {content}
       </ReactMarkdown>

@@ -5,6 +5,8 @@ import LectureNotesEntry from '../components/LectureNotesEntry';
 import LectureNotesView from './LectureNotesView';
 import NoteStudyView from '../components/NoteStudyView';
 import LectureStudyMap from '../components/LectureStudyMap';
+import LectureRewindView from '../components/LectureRewindView';
+import LectureReferencesView from './LectureReferencesView';
 import LectureProgressBar from '../components/LectureProgressBar';
 import LectureMaterialSwitch from '../components/LectureMaterialSwitch';
 import { coursePayload } from '../utils/courseApi';
@@ -22,7 +24,10 @@ import {
 } from '../utils/lectureMaterial';
 import ExerciseSheetPicker from '../components/ExerciseSheetPicker';
 import { askChatKey } from '../utils/askChatStore';
+import StudyPageShell from '../components/StudyPageShell';
 import PinButton from '../components/PinButton';
+import { useCompactLayout } from '../hooks/useCompactLayout';
+import { isRewindDue } from '../utils/rewindUi';
 
 export default function LecturePage({
   course,
@@ -52,7 +57,10 @@ export default function LecturePage({
   const [notes, setNotes] = useState([]);
   const [studyNote, setStudyNote] = useState(null);
   const [studyMapOpen, setStudyMapOpen] = useState(false);
+  const [rewindOpen, setRewindOpen] = useState(false);
   const [notesViewOpen, setNotesViewOpen] = useState(false);
+  const [contentTab, setContentTab] = useState(materialMode === 'exercise' ? 'exercise' : 'lecture');
+  const compact = useCompactLayout();
 
   const loadNotes = useCallback(async () => {
     if (!lectureMeta?.path) return;
@@ -89,6 +97,20 @@ export default function LecturePage({
       onPendingNoteConsumed?.();
     }
   }, [pendingOpenNoteId, notes, onPendingNoteConsumed]);
+
+  useEffect(() => {
+    if (materialMode === 'exercise') {
+      setContentTab((tab) => (tab === 'references' ? tab : 'exercise'));
+    } else if (contentTab !== 'references') {
+      setContentTab('lecture');
+    }
+  }, [materialMode]);
+
+  function handleContentTabChange(tab) {
+    setContentTab(tab);
+    if (tab === 'lecture') onMaterialModeChange?.('lecture');
+    if (tab === 'exercise') onMaterialModeChange?.('exercise');
+  }
 
   function handleOpenTopicFromNote(topicId, noteMaterialMode, subtopicId = null, noteExerciseId = '') {
     if (!lecture || !topicId) return;
@@ -148,6 +170,21 @@ export default function LecturePage({
     return res;
   }
 
+  async function handleUpdateNoteTitle(noteId, title) {
+    if (!lecture?.path || !noteId) return;
+    const res = await window.api.updateLectureNote({
+      lecturePath: lecture.path,
+      noteId,
+      title
+    });
+    if (res?.success) {
+      await loadNotes();
+      if (studyNote?.id === noteId && res.note) setStudyNote(res.note);
+      onNotify?.('Note title saved');
+    }
+    return res;
+  }
+
   async function handleToggleLecturePin() {
     const res = await window.api.toggleLecturePin({ lecturePath: lecture.path });
     if (res?.success && res.lecture) {
@@ -183,7 +220,8 @@ export default function LecturePage({
     return res;
   }
 
-  const isExercise = materialMode === 'exercise';
+  const isExercise = materialMode === 'exercise' && contentTab !== 'references';
+  const isReferences = contentTab === 'references';
   const exerciseSheets = lecture ? getExerciseSheets(lecture) : [];
   const activeExerciseId = resolveActiveExerciseId(lecture, exerciseId);
   const displayTopics = lecture ? getMaterialTopics(lecture, materialMode, activeExerciseId) : [];
@@ -250,34 +288,47 @@ export default function LecturePage({
         onTogglePin={handleToggleNotePin}
         onReorder={handleReorderNotes}
         onMerge={handleMergeNotes}
+        onUpdateTitle={handleUpdateNoteTitle}
         onOpenTopic={handleOpenTopicFromNote}
         onRebuildMetadata={handleRebuildNoteMetadata}
+        onNotify={onNotify}
+      />
+    );
+  }
+
+  if (rewindOpen && !isExercise) {
+    return (
+      <LectureRewindView
+        course={course}
+        lecture={lecture}
+        hasApiKey={hasApiKey}
+        onBack={() => setRewindOpen(false)}
+        onLectureUpdated={handleLectureUpdated}
+        onNotify={onNotify}
       />
     );
   }
 
   return (
-    <div className="h-full flex flex-col overflow-hidden no-drag">
-      <div className="h-8 drag-region flex-shrink-0" />
-      <div className="flex-1 overflow-y-auto">
-        <div className="max-w-3xl mx-auto px-8 py-6 pb-16">
+    <>
+    <StudyPageShell>
           <button type="button" onClick={onBack} className="text-xs text-text-muted hover:text-accent mb-3">
             ← {course?.name}
           </button>
 
           <div className="flex items-start justify-between gap-4 mb-3 flex-wrap">
             <div className="min-w-0">
-              <h1 className="text-2xl font-bold text-text-primary">
+              <h1 className="study-title text-2xl font-bold text-text-primary">
                 <TitleWithMath text={lecture.title} />
               </h1>
               {showExerciseUi && (
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   <LectureMaterialSwitch
-                    mode={materialMode}
-                    onChange={onMaterialModeChange}
+                    mode={contentTab}
+                    onChange={handleContentTabChange}
                     hasExercise={hasExerciseMaterial(lecture)}
                   />
-                  {!hasExerciseMaterial(lecture) && (
+                  {!hasExerciseMaterial(lecture) && contentTab !== 'references' && (
                     <button
                       type="button"
                       disabled={!hasApiKey}
@@ -305,9 +356,15 @@ export default function LecturePage({
                   type="button"
                   onClick={onToggleSidebar}
                   className="text-xs px-2.5 py-1.5 rounded-lg border border-border-DEFAULT text-text-muted hover:text-accent hover:border-accent/40"
-                  title={sidebarHidden ? 'Sidebar einblenden (⌘\\)' : 'Sidebar ausblenden (⌘\\)'}
+                  title={
+                    sidebarHidden
+                      ? 'Sidebar einblenden (⌘\\)'
+                      : compact
+                        ? 'Sidebar ausblenden — mehr Platz (⌘\\)'
+                        : 'Sidebar ausblenden (⌘\\)'
+                  }
                 >
-                  {sidebarHidden ? '☰ Kurse' : '◧ Vollbild'}
+                  {sidebarHidden ? '☰ Kurse' : compact ? '◧ Focus' : '◧ Vollbild'}
                 </button>
               )}
               <PinButton
@@ -315,6 +372,22 @@ export default function LecturePage({
                 onClick={handleToggleLecturePin}
                 title={lecture.pinned ? 'Unpin from Study overview' : 'Pin to Study overview'}
               />
+              {!isExercise && !isReferences && (
+                <button
+                  type="button"
+                  onClick={() => setRewindOpen(true)}
+                  className="relative text-xs px-3 py-1.5 rounded-lg border border-border-DEFAULT text-text-muted hover:text-accent hover:border-accent/40"
+                  title="Weekly recap — refresh what this lecture is about"
+                >
+                  Rewind
+                  {isRewindDue(lecture.studyState?.lastRewindAt) && (
+                    <span
+                      className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-amber-400"
+                      aria-hidden
+                    />
+                  )}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setStudyMapOpen(true)}
@@ -325,7 +398,7 @@ export default function LecturePage({
             </div>
           </div>
 
-          {!isExercise && (
+          {!isExercise && !isReferences && (
             <LectureProgressBar
               lecture={lecture}
               materialMode={materialMode}
@@ -334,6 +407,15 @@ export default function LecturePage({
             />
           )}
 
+          {isReferences ? (
+            <LectureReferencesView
+              course={course}
+              lecture={lecture}
+              hasApiKey={hasApiKey}
+              onNotify={onNotify}
+            />
+          ) : (
+            <>
           {isExercise && !hasExerciseMaterial(lecture) && (
             <div className="rounded-xl border border-dashed border-accent/40 bg-accent/5 p-5 mb-6">
               <p className="text-sm text-text-secondary leading-relaxed mb-3">
@@ -388,7 +470,7 @@ export default function LecturePage({
 
           {(summary || !isExercise) && (
             <section className="mb-8">
-              <h2 className="text-sm font-semibold text-text-primary uppercase tracking-wide mb-3">
+              <h2 className="study-section-title text-sm font-semibold text-text-primary uppercase tracking-wide mb-3">
                 {isExercise
                   ? 'Exercise focus'
                   : lecture.itemType === 'promoted'
@@ -396,7 +478,7 @@ export default function LecturePage({
                     : 'Lecture summary'}
               </h2>
               <div
-                className={`rounded-xl border p-5 ${
+                className={`study-card rounded-xl border p-5 ${
                   isExercise
                     ? 'border-emerald-900/30 bg-emerald-950/10'
                     : 'border-border-DEFAULT bg-bg-secondary'
@@ -430,7 +512,7 @@ export default function LecturePage({
           )}
 
           <section className="mb-6">
-            <h2 className="text-sm font-semibold text-text-primary uppercase tracking-wide mb-3">
+            <h2 className="study-section-title text-sm font-semibold text-text-primary uppercase tracking-wide mb-3">
               {isExercise ? 'Practice topics' : 'Topics'} ({displayTopics.length})
             </h2>
             <div className="grid gap-3">
@@ -559,7 +641,11 @@ export default function LecturePage({
             </div>
           </section>
 
-          <LectureNotesEntry count={notes.length} onOpen={() => setNotesViewOpen(true)} />
+          <LectureNotesEntry
+            notes={notes}
+            onOpen={() => setNotesViewOpen(true)}
+            onOpenNote={(note) => setStudyNote(note)}
+          />
 
           <AskPanel
             chatKey={askChatKey(lecture.path, null, materialMode)}
@@ -584,8 +670,9 @@ export default function LecturePage({
               })
             }
           />
-        </div>
-      </div>
+            </>
+          )}
+    </StudyPageShell>
 
       <LectureStudyMap
         lecture={lecture}
@@ -596,6 +683,6 @@ export default function LecturePage({
         onOpenTopic={onOpenTopic}
         onLectureUpdated={handleLectureUpdated}
       />
-    </div>
+    </>
   );
 }

@@ -8,7 +8,8 @@ export default function NoteChatPanel({
   onSaveToNotes,
   onOpenSavedNote,
   disabled,
-  placeholder
+  placeholder,
+  variant = 'note'
 }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
@@ -98,29 +99,38 @@ export default function NoteChatPanel({
     ]);
   }
 
-  const suggestions = [
-    'Explain my note more clearly',
-    'What does this formula mean?',
-    'What am I missing here?',
-    'Give an example for this point'
-  ];
+  const isReference = variant === 'reference';
+  const suggestions = isReference
+    ? [
+        'Explain this in simple terms',
+        'What are the key points?',
+        'How does this relate to the lecture?',
+        'Give me an example'
+      ]
+    : [
+        'Explain my note more clearly',
+        'What does this formula mean?',
+        'What am I missing here?',
+        'Give an example for this point'
+      ];
 
   return (
     <div className="flex flex-col h-full min-h-0">
       <p className="text-xs font-medium text-text-muted uppercase tracking-wide mb-2 flex-shrink-0">
-        Ask about this note
+        {isReference ? 'Ask about this reference' : 'Ask about this note'}
       </p>
 
       <div
         ref={chatRef}
         className="flex-1 min-h-0 overflow-y-auto space-y-3 mb-2 pr-1 note-chat-scroll"
-        onMouseUp={handleMouseUp}
+        onMouseUp={isReference ? undefined : handleMouseUp}
       >
         {messages.length === 0 && !loading && (
           <div className="space-y-2">
             <p className="text-xs text-text-muted leading-relaxed">
-              AI is grounded in your note first, then the topic, lecture, and course. Highlight part
-              of an answer or add the full reply — it goes into this same note on the left.
+              {isReference
+                ? 'AI sees your saved reference (text, screenshot, or link) plus lecture context.'
+                : 'AI is grounded in your note first, then the topic, lecture, and course. Highlight part of an answer or add the full reply — it goes into this same note on the left.'}
             </p>
             <div className="flex flex-wrap gap-1.5">
               {suggestions.map((s) => (
@@ -142,30 +152,32 @@ export default function NoteChatPanel({
           m.role === 'user' ? (
             <div
               key={i}
-              className="text-sm leading-relaxed whitespace-pre-wrap rounded-lg px-3 py-2 bg-accent/15 text-text-primary ml-4"
+              className="text-base leading-relaxed whitespace-pre-wrap rounded-lg px-3 py-2.5 bg-accent/15 text-text-primary ml-4 note-chat-user-bubble"
             >
               {m.text}
             </div>
           ) : (
             <div key={i} className="mr-2 group" data-assistant-msg>
               <div className="rounded-lg px-3 py-2 bg-bg-tertiary border border-border-subtle note-chat-md">
-                <MarkdownView className="markdown-body-chat">{m.text}</MarkdownView>
+                <MarkdownView className="markdown-body-study-chat">{m.text}</MarkdownView>
               </div>
-              <div className="flex flex-wrap gap-2 mt-1.5 opacity-90 group-hover:opacity-100">
-                <button
-                  type="button"
-                  disabled={disabled || saving}
-                  onClick={() => handleSave(m.text, { isSelection: false })}
-                  className="text-[11px] px-2 py-0.5 rounded border border-border-DEFAULT text-text-muted hover:text-accent hover:border-accent/40 disabled:opacity-40"
-                >
-                  Add answer to this note
-                </button>
-              </div>
+              {!isReference && onSaveToNotes && (
+                <div className="flex flex-wrap gap-2 mt-1.5 opacity-90 group-hover:opacity-100">
+                  <button
+                    type="button"
+                    disabled={disabled || saving}
+                    onClick={() => handleSave(m.text, { isSelection: false })}
+                    className="text-[11px] px-2 py-0.5 rounded border border-border-DEFAULT text-text-muted hover:text-accent hover:border-accent/40 disabled:opacity-40"
+                  >
+                    Add answer to this note
+                  </button>
+                </div>
+              )}
             </div>
           )
         )}
 
-        {relevantNotes.length > 0 && onOpenSavedNote && (
+        {!isReference && relevantNotes.length > 0 && onOpenSavedNote && (
           <RelevantSavedNotes
             notes={relevantNotes}
             onOpenNote={(n) => onOpenSavedNote(n.id)}
@@ -176,7 +188,7 @@ export default function NoteChatPanel({
         <div ref={bottomRef} />
       </div>
 
-      {selection && (
+      {!isReference && selection && (
         <div className="mb-2 rounded-lg border border-accent/40 bg-accent/10 px-3 py-2 flex flex-wrap items-center gap-2 flex-shrink-0">
           <span className="text-xs text-text-secondary flex-1 min-w-0 truncate">
             Selected: “{selection.text.slice(0, 60)}
@@ -200,7 +212,7 @@ export default function NoteChatPanel({
         </div>
       )}
 
-      {saveNotice && (
+      {!isReference && saveNotice && (
         <p className="text-xs text-accent mb-2 flex-shrink-0">{saveNotice}</p>
       )}
 

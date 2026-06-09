@@ -1,97 +1,89 @@
 const assert = require('assert');
 const { deriveStudyNoteTitle, isWeakNoteTitle } = require('../shared/noteTitle.cjs');
-const { buildNoteTitle } = require('../shared/noteListMeta.cjs');
+const { buildNoteTitle, buildNotePreview } = require('../shared/noteListMeta.cjs');
 
 function eq(actual, expected, label) {
   assert.strictEqual(actual, expected, `${label}\nexpected: ${expected}\nactual: ${actual}`);
 }
 
-const longAnova = buildNoteTitle({
-  title: '',
-  topicTitle: 'ANOVA',
-  highlightedText:
-    'In diesem Beispiel berechnen wir SS_between aus Gruppenmitteln und interpretieren danach den F-Test Schritt fuer Schritt.',
-  refinedNote:
-    'Lange Erklaerung: zuerst Quadratsummen berechnen, dann F-Test auswerten, danach Entscheidung.',
-  source: 'card',
-  locale: 'de',
-  keyIdeas: []
-});
-assert(longAnova.length <= 55, 'long fragment should be shortened');
-
 eq(
   deriveStudyNoteTitle({
-    highlightedText: 'Eta-Quadrat η² als Effektstärke in der ANOVA',
+    subtopicTitle: 'Varianz zwischen Gruppen',
     topicTitle: 'ANOVA'
   }),
-  'Eta² / Effektstärke',
-  'eta heuristic'
+  'Varianz zwischen Gruppen',
+  'subtopic title priority'
 );
 
-const fTitle = deriveStudyNoteTitle({
-  highlightedText: 'Beispielaufgabe zum F-Test in der ANOVA',
+eq(
+  deriveStudyNoteTitle({
+    sectionHeading: 'Effektstärken',
+    topicTitle: 'ANOVA'
+  }),
+  'Effektstärken',
+  'section heading priority'
+);
+
+const fromHighlight = deriveStudyNoteTitle({
+  highlightedText: 'Der F-Test vergleicht zwei Varianzen Schritt für Schritt.',
   topicTitle: 'ANOVA'
 });
+assert.ok(fromHighlight.includes('F-Test'), `highlight sentence title expected, got: ${fromHighlight}`);
+
+eq(
+  deriveStudyNoteTitle({
+    source: 'tutorChat',
+    topicTitle: 'Mengenlehre'
+  }),
+  'Tutor answer · Mengenlehre',
+  'source hint fallback'
+);
+
+assert(isWeakNoteTitle('AI clarification', 'Mengenlehre'), 'weak title detection');
+assert(!isWeakNoteTitle('Varianz zwischen Gruppen', 'ANOVA'), 'good title should stay');
 assert(
-  fTitle === 'Beispiel für F-Test' || fTitle === 'F-Test interpretieren',
-  `f-test title unexpected: ${fTitle}`
+  isWeakNoteTitle('Die Wahl zwischen Eta-Quadrat und Omega-Quadrat hängt von', 'ANOVA'),
+  'sentence fragment ending with von is weak'
+);
+assert(
+  isWeakNoteTitle('ein signifikantes Ergebnis nicht angibt, welche Gruppen sich', 'ANOVA'),
+  'lowercase sentence fragment is weak'
 );
 
 eq(
   deriveStudyNoteTitle({
-    highlightedText: 'Vereinigung A ∪ B mit Beispiel',
-    topicTitle: 'Mengenlehre'
+    title: 'Die Wahl zwischen Eta-Quadrat und Omega-Quadrat hängt von',
+    subtopicTitle: 'Effektgrößen in der ANOVA',
+    topicTitle: 'Einfaktorielle Varianzanalyse'
   }),
-  'Vereinigung von Mengen',
-  'union heuristic'
+  'Effektgrößen in der ANOVA',
+  'weak stored title falls back to subtopic'
 );
 
 eq(
   deriveStudyNoteTitle({
-    highlightedText: 'Schnitt A ∩ B mit Venn-Diagramm',
-    topicTitle: 'Mengenlehre'
+    keyIdeas: ['Eta-Quadrat misst Varianzanteil'],
+    highlightedText: 'Die Wahl zwischen Eta-Quadrat und Omega-Quadrat hängt von mehreren Faktoren ab.',
+    topicTitle: 'ANOVA'
   }),
-  'Schnitt von Mengen',
-  'intersection heuristic'
+  'Eta-Quadrat misst Varianzanteil',
+  'key idea before highlight snippet'
 );
 
-eq(
-  deriveStudyNoteTitle({
-    highlightedText: 'Defining Sets by Enumeration and listing elements',
-    topicTitle: 'Mengenlehre'
-  }),
-  'Mengen aufzählen',
-  'enumeration heuristic'
-);
-
-eq(
-  deriveStudyNoteTitle({
-    highlightedText: 'x ∈ A oder x ∉ B prüfen',
-    topicTitle: 'Mengenlehre'
-  }),
-  'Element in Menge prüfen',
-  'membership heuristic'
-);
-
-eq(
-  deriveStudyNoteTitle({
-    highlightedText: 'Reihenfolge irrelevant in Mengen',
-    topicTitle: 'Mengenlehre'
-  }),
-  'Reihenfolge in Mengen',
-  'order heuristic'
-);
-
-const genericAi = deriveStudyNoteTitle({
-  title: 'AI clarification',
-  source: 'tutorChat',
-  topicTitle: 'Mengenlehre',
-  subtopicTitle: 'Vereinigung von Mengen'
+const edited = buildNoteTitle({
+  title: 'My custom title',
+  titleEdited: true,
+  topicTitle: 'ANOVA'
 });
-assert(genericAi !== 'AI clarification', 'generic AI title should be replaced');
-assert(/vereinigung|mengenlehre/i.test(genericAi), `context title expected, got: ${genericAi}`);
+eq(edited, 'My custom title', 'edited title preserved');
 
-assert(isWeakNoteTitle('AI clarification', 'Mengenlehre'), 'weak title detection should catch AI clarification');
-assert(!isWeakNoteTitle('Vereinigung von Mengen', 'Mengenlehre'), 'good title should stay');
+const preview = buildNotePreview({
+  refinedNote: 'Der F-Test prüft ob Gruppenunterschiede zufällig sind.',
+  title: 'F-Test',
+  topicTitle: 'ANOVA',
+  locale: 'de'
+});
+assert.ok(preview.includes('F-Test'), `preview from body expected, got: ${preview}`);
+assert.ok(!preview.startsWith('Helps with:'), 'no generic helps-with preview');
 
 console.log('note-title tests OK');

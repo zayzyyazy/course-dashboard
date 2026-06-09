@@ -6,10 +6,12 @@ contextBridge.exposeInMainWorld('api', {
 
   openPdf: () => ipcRenderer.invoke('dialog:openPdf'),
   openExercisePdf: () => ipcRenderer.invoke('dialog:openExercisePdf'),
+  openReferenceImage: () => ipcRenderer.invoke('dialog:openReferenceImage'),
   openSettings: () => ipcRenderer.invoke('nav:settings'),
 
   getCourses: () => ipcRenderer.invoke('courses:list'),
   getDashboardOverview: () => ipcRenderer.invoke('dashboard:getOverview'),
+  askDashboard: (data) => ipcRenderer.invoke('dashboard:ask', data),
   createCourse: (data) => ipcRenderer.invoke('courses:create', data),
   reorderCourses: (courseIds) => ipcRenderer.invoke('courses:reorder', { courseIds }),
   deleteCourse: (data) => ipcRenderer.invoke('courses:delete', data),
@@ -33,6 +35,7 @@ contextBridge.exposeInMainWorld('api', {
   },
 
   markLectureOpened: (lecturePath) => ipcRenderer.invoke('lecture:markOpened', lecturePath),
+  markRewindRead: (data) => ipcRenderer.invoke('lecture:markRewindRead', data),
   markTopicStudied: (data) => ipcRenderer.invoke('lecture:markTopicStudied', data),
   toggleSubtopicStudied: (data) => ipcRenderer.invoke('lecture:toggleSubtopicStudied', data),
   cycleSubtopicConfidence: (data) => ipcRenderer.invoke('lecture:cycleSubtopicConfidence', data),
@@ -41,7 +44,10 @@ contextBridge.exposeInMainWorld('api', {
   autoSaveHighlightNote: (data) => ipcRenderer.invoke('lecture:autoSaveHighlightNote', data),
   appendToNoteFromStudy: (data) => ipcRenderer.invoke('lecture:appendToNoteFromStudy', data),
   deleteNoteStudyBlock: (data) => ipcRenderer.invoke('lecture:deleteNoteStudyBlock', data),
+  addNoteInlineHighlight: (data) => ipcRenderer.invoke('lecture:addNoteInlineHighlight', data),
+  removeNoteInlineHighlight: (data) => ipcRenderer.invoke('lecture:removeNoteInlineHighlight', data),
   deleteLectureNote: (data) => ipcRenderer.invoke('lecture:deleteNote', data),
+  updateLectureNote: (data) => ipcRenderer.invoke('lecture:updateNote', data),
   toggleLecturePin: (data) => ipcRenderer.invoke('pins:toggleLecture', data),
   toggleTopicPin: (data) => ipcRenderer.invoke('pins:toggleTopic', data),
   toggleSubtopicPin: (data) => ipcRenderer.invoke('pins:toggleSubtopic', data),
@@ -57,5 +63,21 @@ contextBridge.exposeInMainWorld('api', {
   askAboutNote: (data) => ipcRenderer.invoke('lecture:askAboutNote', data),
   askAboutSelection: (data) => ipcRenderer.invoke('lecture:askAboutSelection', data),
   expandTopic: (data) => ipcRenderer.invoke('lecture:expandTopic', data),
-  expandSubtopic: (data) => ipcRenderer.invoke('lecture:expandSubtopic', data)
+  expandSubtopic: (data) => ipcRenderer.invoke('lecture:expandSubtopic', data),
+  generateRewind: (data) => ipcRenderer.invoke('lecture:generateRewind', data),
+
+  listLectureReferences: (lecturePath) =>
+    ipcRenderer.invoke('lecture:listReferences', { lecturePath }),
+  addLectureReference: (data) => ipcRenderer.invoke('lecture:addReference', data),
+  updateLectureReference: (data) => ipcRenderer.invoke('lecture:updateReference', data),
+  deleteLectureReference: (data) => ipcRenderer.invoke('lecture:deleteReference', data),
+  importReferenceImage: (data) => ipcRenderer.invoke('lecture:importReferenceImage', data),
+  importReferenceClipboard: (data) => ipcRenderer.invoke('lecture:importReferenceClipboard', data),
+  getReferenceAsset: (data) => ipcRenderer.invoke('lecture:getReferenceAsset', data),
+  getPageImage: (data) => ipcRenderer.invoke('lecture:getPageImage', data),
+  describeReference: (data) => ipcRenderer.invoke('lecture:describeReference', data),
+  classifyReferenceText: (data) => ipcRenderer.invoke('lecture:classifyReferenceText', data),
+  askAboutReference: (data) => ipcRenderer.invoke('lecture:askAboutReference', data),
+  openExternalUrl: (url) => ipcRenderer.invoke('lecture:openExternalUrl', { url }),
+  openExerciseCoach: (payload) => ipcRenderer.invoke('practice:openExerciseCoach', payload)
 });

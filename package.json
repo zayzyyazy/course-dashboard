@@ -13,10 +13,12 @@
     "package:mac-zip": "npm run build && mkdir -p release/mac && rm -rf release/mac && cp -R \"dist-app/mac-arm64/Course Dashboard.app\" release/mac/ && cp release/INSTALL-Mac.txt release/mac/ && cd release && rm -f Course-Dashboard-mac.zip && zip -r Course-Dashboard-mac.zip mac && cp Course-Dashboard-mac.zip \"/Users/zay/Desktop/Course-Dashboard-mac.zip\""
   },
   "dependencies": {
+    "@napi-rs/canvas": "^0.1.100",
     "electron-store": "^8.1.0",
     "katex": "^0.17.0",
     "openai": "^4.52.7",
     "pdf-parse": "^1.1.1",
+    "pdfjs-dist": "^4.10.38",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-markdown": "^9.0.1",

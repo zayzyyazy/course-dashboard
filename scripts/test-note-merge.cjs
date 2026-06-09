@@ -41,6 +41,7 @@ try {
     /Merged from:/i.test(finalNotes[0].refinedNote || ''),
     'merged marker should be in target note'
   );
+  assert(finalNotes[0].preview?.trim(), 'preview should refresh after merge');
 
   console.log('note-merge tests OK');
 } finally {

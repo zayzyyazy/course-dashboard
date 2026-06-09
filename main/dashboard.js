@@ -273,6 +273,7 @@ function buildDashboardOverview(store) {
     courseCards.push({
       id: course.id,
       name: course.name,
+      storageKey: course.storageKey,
       emoji: course.emoji,
       color: course.color,
       studyMeta,
