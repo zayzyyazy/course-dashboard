@@ -1,17 +1,23 @@
 # Course Dashboard
 
-Local-first macOS desktop app for university study: import lecture PDFs, get AI-generated topic cards, track progress, save notes, and practice with linked Übung sheets.
+Local-first macOS desktop study hub for university courses. Import lecture PDFs, get AI-generated topic cards, track progress, save notes, link Übung sheets, and practice with an integrated exam coach — all stored in a local vault on your machine.
 
 **Hierarchy:** Course → Lectures / Study units → Topics → Subtopics → Notes & Tutor
 
-Built with Electron, React, and the OpenAI API. All course data stays on your machine in a local vault.
+## Screenshot
+
+### Study overview — pins, best next step, and course progress
+
+The home dashboard combines pinned shortcuts, an AI study-plan assistant, per-course progress cards, and exam countdowns so you always know what to study next.
+
+![Course Dashboard study overview](docs/screenshots/dashboard.png)
 
 ## What it does
 
 ### Import & structure
 - Import **lecture PDFs** — AI extracts topics, subtopics, and tutor-style summary cards
 - **Course settings** — per-course AI profile (strength, exam style, focus, difficulty, exam date, ECTS)
-- **Promote topic → study unit** — turn a heavy lecture topic into its own mini-unit with a finer breakdown
+- **Promote topic → study unit** — turn a heavy lecture topic into its own mini-unit
 
 ### Lecture ↔ Übung (exercise sheets)
 - Attach **one or more exercise PDFs** per lecture (Übung 1, Übung 2, …)
@@ -29,8 +35,8 @@ Built with Electron, React, and the OpenAI API. All course data stays on your ma
 - **Ask tutor** on lectures and topics
 - **Ask about saved notes** and **Ask AI on highlighted text**
 - **Go deeper** on topics and subtopics (cached expansions)
-- **Regenerate** deeper content with feedback chips (German, shorter, more detail, etc.) and optional notes
-- **Language-aware AI** — answers follow lecture/topic language (German/English), not raw PDF extraction alone
+- **Regenerate** deeper content with feedback chips (German, shorter, more detail, etc.)
+- **Language-aware AI** — answers follow lecture/topic language (German/English)
 - **KaTeX math** in titles and markdown
 
 ### Highlights & notes
@@ -39,26 +45,32 @@ Built with Electron, React, and the OpenAI API. All course data stays on your ma
 - **Note study view** — read, chat, append tutor answers into the note
 - **Notes list** — filter by topic, drag reorder, Alt+drag merge
 - **Rebuild note metadata** — re-title/repair notes with AI
-- Clean highlight text and readable plain-text previews
 
 ### Dashboard & pins
 - **Home dashboard** — pinned shortcuts, best next step, per-course next step, exam countdown
-- **Persistent pins** on lectures, topics, subtopics, and notes (dashboard shortcuts)
+- **Persistent pins** on lectures, topics, subtopics, and notes
 - **Pin to screen** — session-only floating sticky cards over content
+- **Ask about my study plan** — dashboard AI chat grounded in your real progress
 
-## Install
+## Tech stack
+
+| Layer | Technology |
+|-------|------------|
+| Desktop shell | Electron |
+| Frontend | React, Vite, Tailwind CSS |
+| PDF processing | pdf-parse, pdfjs-dist |
+| Math rendering | KaTeX, react-markdown |
+| AI | OpenAI API |
+| Storage | Local vault + electron-store |
+
+## Install & run
 
 ```bash
 npm install
-```
-
-## Run locally
-
-```bash
 npm run dev
 ```
 
-Set your OpenAI API key in **Settings**. The key is stored locally (Electron Store) and is never committed.
+Set your OpenAI API key in **Settings**. The key is stored locally and is never committed.
 
 ## Build desktop app
 
@@ -66,13 +78,11 @@ Set your OpenAI API key in **Settings**. The key is stored locally (Electron Sto
 npm run build
 ```
 
-Packaged output goes to `dist-app/`. To copy a fresh build to your Desktop:
+Packaged output goes to `dist-app/`. Copy a fresh build to Desktop:
 
 ```bash
 npm run deploy:desktop
 ```
-
-Do not commit packaged apps, DMGs, zips, or build artifacts.
 
 ## Local data
 
@@ -82,8 +92,8 @@ The vault holds source PDFs, extracted text, generated topic cards, notes, pins,
 
 ## After cloning
 
-1. Run `npm install`
-2. Run `npm run dev`
+1. `npm install`
+2. `npm run dev`
 3. Add your OpenAI API key in Settings
 4. Import a lecture PDF or point Settings at your vault folder
 
@@ -99,10 +109,10 @@ node scripts/test-note-routing.cjs
 node scripts/test-note-merge.cjs
 ```
 
-## Tech stack
+## Related projects
 
-Electron · React · Vite · Tailwind CSS · OpenAI API · pdf-parse · KaTeX · react-markdown
+Part of a personal study ecosystem with [StudyAI](https://github.com/zayzyyazy/studyai) and [Exam Practice Coach](https://github.com/zayzyyazy/exam-practice-coach).
 
 ## Author
 
-**zayzyyazy** — https://github.com/zayzyyazy
+**[zayzyyazy](https://github.com/zayzyyazy)**

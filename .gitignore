@@ -64,6 +64,8 @@ coverage/
 # Private screenshots/debug captures
 screenshots/
 debug-screenshots/
+!docs/screenshots/
+!docs/screenshots/**
 playwright-report/
 test-results/
 
