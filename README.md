@@ -102,3 +102,7 @@ node scripts/test-note-merge.cjs
 ## Tech stack
 
 Electron · React · Vite · Tailwind CSS · OpenAI API · pdf-parse · KaTeX · react-markdown
+
+## Author
+
+**zayzyyazy** — https://github.com/zayzyyazy
